@@ -37,7 +37,7 @@ class TmapClient(private val appKey: String) {
         // 1) 정식주소 지오코딩
         runCatching {
             val url = "$base/geo/fullAddrGeo?version=1&format=json&coordType=WGS84GEO&fullAddr=$enc"
-            val text = tmapGet(url, appKey).await().toString()
+            val text = tmapGet(url, appKey).await<JsString>().toString()
             val root = json.parseToJsonElement(text).jsonObject
             val coord = root["coordinateInfo"]?.jsonObject
                 ?.get("coordinate")?.jsonArray?.firstOrNull()?.jsonObject
@@ -52,7 +52,7 @@ class TmapClient(private val appKey: String) {
         // 2) POI 키워드 검색 fallback
         runCatching {
             val url = "$base/pois?version=1&format=json&count=1&searchKeyword=$enc"
-            val text = tmapGet(url, appKey).await().toString()
+            val text = tmapGet(url, appKey).await<JsString>().toString()
             val root = json.parseToJsonElement(text).jsonObject
             val poi = root["searchPoiInfo"]?.jsonObject
                 ?.get("pois")?.jsonObject
@@ -93,7 +93,7 @@ class TmapClient(private val appKey: String) {
         """.trimIndent()
 
         val url = "$base/routes/routeOptimization20?version=1&format=json"
-        val text = tmapPost(url, appKey, body).await().toString()
+        val text = tmapPost(url, appKey, body).await<JsString>().toString()
         val root = json.parseToJsonElement(text).jsonObject
         val features = root["features"]?.jsonArray
             ?: throw TmapException(errorMessage(root) ?: "티맵 응답에 features 가 없습니다.")
