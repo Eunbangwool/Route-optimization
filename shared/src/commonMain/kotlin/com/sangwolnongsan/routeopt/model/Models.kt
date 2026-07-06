@@ -50,4 +50,4 @@ data class OptimizedRoute(
 )
 
 @Serializable
-enum class RouteSource { TMAP, STRAIGHT_LINE }
+enum class RouteSource { TMAP, OSRM, STRAIGHT_LINE }

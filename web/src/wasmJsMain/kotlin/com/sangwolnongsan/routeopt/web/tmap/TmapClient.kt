@@ -7,6 +7,7 @@ import com.sangwolnongsan.routeopt.model.OptimizedRoute
 import com.sangwolnongsan.routeopt.model.Place
 import com.sangwolnongsan.routeopt.model.RouteLeg
 import com.sangwolnongsan.routeopt.model.RouteSource
+import com.sangwolnongsan.routeopt.web.route.RouteProvider
 import kotlinx.coroutines.await
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -26,13 +27,13 @@ class TmapException(message: String) : Exception(message)
  *
  * 모든 함수는 브라우저 fetch 를 사용하므로 suspend.
  */
-class TmapClient(private val appKey: String) {
+class TmapClient(private val appKey: String) : RouteProvider {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val base = "https://apis.openapi.sk.com/tmap"
 
     /** 주소/장소명 → 좌표. 매칭 실패 시 null. */
-    suspend fun geocode(query: String): Pair<LatLng, String?>? {
+    override suspend fun geocode(query: String): Pair<LatLng, String?>? {
         val enc = encodeURIComponent(query)
         // 1) 정식주소 지오코딩
         runCatching {
@@ -71,7 +72,7 @@ class TmapClient(private val appKey: String) {
      * 티맵 경로최적화. [start]→(최적 순서 경유지)→[end].
      * @param roundTrip true 면 end 는 무시하고 start 로 복귀.
      */
-    suspend fun optimize(start: Place, vias: List<Place>, end: Place, roundTrip: Boolean): OptimizedRoute {
+    override suspend fun optimize(start: Place, vias: List<Place>, end: Place, roundTrip: Boolean): OptimizedRoute {
         val startC = requireNotNull(start.coord)
         val endC = if (roundTrip) startC else requireNotNull(end.coord)
 

@@ -71,19 +71,67 @@
             document.getElementById('ro-map').style.display = 'none';
         });
 
-        var _roMap = null;
+        var _roMap = null;       // 티맵 지도 인스턴스
+        var _leaflet = null;     // Leaflet(OSM) 지도 인스턴스
+
+        function roLoadScript(src, cb, err) {
+            var s = document.createElement('script');
+            s.src = src; s.onload = cb; s.onerror = err;
+            document.head.appendChild(s);
+        }
+        function roLoadCss(href) {
+            var l = document.createElement('link');
+            l.rel = 'stylesheet'; l.href = href;
+            document.head.appendChild(l);
+        }
 
         // Kotlin 에서 호출: 최적화 결과(JSON)를 받아 지도에 그린다.
-        // payload = { markers:[{lat,lon,label}], path:[[lon,lat], ...] }
+        // payload = { engine:"tmap"|"osm", markers:[{lat,lon,label}], path:[[lon,lat],...] }
         window.roShowMap = function (json) {
             var data;
             try { data = JSON.parse(json); } catch (e) { return; }
-            var key = (localStorage.getItem('tmap_appkey') || '').trim();
             var errBox = document.getElementById('ro-map-err');
             errBox.style.display = 'none';
-
             document.getElementById('ro-map').style.display = 'block';
+            if (data.engine === 'osm') roShowOsm(data, errBox);
+            else roShowTmap(data, errBox);
+        };
 
+        // OSM/OSRM 결과 → Leaflet + OSM 타일 (키 불필요)
+        function roShowOsm(data, errBox) {
+            function draw() {
+                var canvas = document.getElementById('ro-map-canvas');
+                canvas.innerHTML = '';
+                if (_leaflet) { _leaflet.remove(); _leaflet = null; }
+                var markers = data.markers || [];
+                var center = markers.length > 0 ? [markers[0].lat, markers[0].lon] : [37.5665, 126.9780];
+                _leaflet = L.map('ro-map-canvas').setView(center, 12);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(_leaflet);
+                var pts = [];
+                markers.forEach(function (m, i) {
+                    L.marker([m.lat, m.lon]).addTo(_leaflet).bindPopup((i + 1) + '. ' + m.label);
+                    pts.push([m.lat, m.lon]);
+                });
+                var path = (data.path || []).map(function (c) { return [c[1], c[0]]; });
+                if (path.length > 1) L.polyline(path, { color: '#3B82F6', weight: 5 }).addTo(_leaflet);
+                var bnds = path.length > 1 ? path : pts;
+                if (bnds.length > 1) { try { _leaflet.fitBounds(bnds); } catch (e) {} }
+                setTimeout(function () { try { _leaflet.invalidateSize(); } catch (e) {} }, 120);
+            }
+            if (typeof L !== 'undefined' && L.map) { draw(); }
+            else {
+                roLoadCss('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css');
+                roLoadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js', draw, function () {
+                    errBox.textContent = '지도 라이브러리(Leaflet) 로드 실패.';
+                    errBox.style.display = 'block';
+                });
+            }
+        }
+
+        // 티맵 결과 → 티맵 JS SDK (앱키 필요)
+        function roShowTmap(data, errBox) {
+            var key = (localStorage.getItem('tmap_appkey') || '').trim();
             function draw() {
                 var canvas = document.getElementById('ro-map-canvas');
                 canvas.innerHTML = '';
@@ -92,37 +140,28 @@
                     ? new Tmapv2.LatLng(markers[0].lat, markers[0].lon)
                     : new Tmapv2.LatLng(37.5665, 126.9780);
                 _roMap = new Tmapv2.Map('ro-map-canvas', { center: center, zoom: 12, width: '100%', height: '100%' });
-
                 var bounds = new Tmapv2.LatLngBounds();
                 markers.forEach(function (m, i) {
                     var pos = new Tmapv2.LatLng(m.lat, m.lon);
                     new Tmapv2.Marker({ position: pos, map: _roMap, label: String(i + 1), title: m.label });
                     bounds.extend(pos);
                 });
-
                 var path = (data.path || []).map(function (c) { return new Tmapv2.LatLng(c[1], c[0]); });
-                if (path.length > 1) {
-                    new Tmapv2.Polyline({ path: path, strokeColor: '#3B82F6', strokeWeight: 6, map: _roMap });
-                }
+                if (path.length > 1) new Tmapv2.Polyline({ path: path, strokeColor: '#3B82F6', strokeWeight: 6, map: _roMap });
                 if (markers.length > 1) { try { _roMap.fitBounds(bounds); } catch (e) {} }
             }
-
-            if (typeof Tmapv2 !== 'undefined' && Tmapv2.Map) {
-                draw();
-            } else if (key) {
-                var sc = document.createElement('script');
-                sc.src = 'https://apis.openapi.sk.com/tmap/jsv2?version=1&appKey=' + encodeURIComponent(key);
-                sc.onload = draw;
-                sc.onerror = function () {
-                    errBox.textContent = '티맵 지도 SDK 로드 실패 — 앱키/도메인 등록을 확인하세요.';
-                    errBox.style.display = 'block';
-                };
-                document.head.appendChild(sc);
+            if (typeof Tmapv2 !== 'undefined' && Tmapv2.Map) { draw(); }
+            else if (key) {
+                roLoadScript('https://apis.openapi.sk.com/tmap/jsv2?version=1&appKey=' + encodeURIComponent(key),
+                    draw, function () {
+                        errBox.textContent = '티맵 지도 SDK 로드 실패 — 앱키/도메인 등록을 확인하세요.';
+                        errBox.style.display = 'block';
+                    });
             } else {
                 errBox.textContent = '티맵 앱키가 없어 지도를 표시할 수 없습니다.';
                 errBox.style.display = 'block';
             }
-        };
+        }
     </script>
     <script src="routeopt-web.js"></script>
 </body>

@@ -21,6 +21,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,12 +47,15 @@ import com.sangwolnongsan.routeopt.model.OptimizedRoute
 import com.sangwolnongsan.routeopt.model.Place
 import com.sangwolnongsan.routeopt.model.RouteSource
 import com.sangwolnongsan.routeopt.optimize.StraightLineOptimizer
+import com.sangwolnongsan.routeopt.web.osrm.OsrmClient
+import com.sangwolnongsan.routeopt.web.route.RouteProvider
 import com.sangwolnongsan.routeopt.web.tmap.TmapClient
 import com.sangwolnongsan.routeopt.web.tmap.lsGet
 import com.sangwolnongsan.routeopt.web.tmap.lsSet
 import com.sangwolnongsan.routeopt.web.tmap.encodeURIComponent
 import com.sangwolnongsan.routeopt.web.tmap.roShowMap
 import com.sangwolnongsan.routeopt.web.util.openUrl
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -59,10 +63,13 @@ import kotlin.math.roundToInt
 
 private const val KEY_STORE = "tmap_appkey"
 
+private enum class Provider { TMAP, OSM }
+
 @Composable
 fun RouteOptimizerScreen() {
     val scope = rememberCoroutineScope()
 
+    var provider by remember { mutableStateOf(Provider.TMAP) }
     var appKey by remember { mutableStateOf(lsGet(KEY_STORE)) }
     val addresses = remember { mutableStateListOf("", "") }
     var roundTrip by remember { mutableStateOf(false) }
@@ -76,25 +83,29 @@ fun RouteOptimizerScreen() {
         error = null
         result = null
         val key = appKey.trim()
+        val osm = provider == Provider.OSM
         val queries = addresses.map { it.trim() }.filter { it.isNotEmpty() }
         when {
-            key.isEmpty() -> { error = "티맵 앱키를 입력하세요."; return }
+            !osm && key.isEmpty() -> { error = "티맵 앱키를 입력하거나 OSM 무료 모드를 선택하세요."; return }
             queries.size < 2 -> { error = "주소를 2개 이상 입력하세요."; return }
         }
         busy = true
         scope.launch {
             try {
-                val client = TmapClient(key)
+                val client: RouteProvider = if (osm) OsrmClient() else TmapClient(key)
+                val srcName = if (osm) "OSM" else "티맵"
                 val places = ArrayList<Place>()
                 val failed = ArrayList<String>()
                 queries.forEachIndexed { i, q ->
                     status = "주소 변환 중 (${i + 1}/${queries.size}): $q"
-                    val geo = client.geocode(q)
+                    val geo = runCatching { client.geocode(q) }.getOrNull()
                     if (geo == null) {
                         failed.add(q)
                     } else {
                         places.add(Place(id = "p$i", address = q, coord = geo.first, resolvedName = geo.second))
                     }
+                    // Nominatim 공개 서버 rate limit(≈1/s) 준수
+                    if (osm && i < queries.lastIndex) delay(1100)
                 }
                 if (failed.isNotEmpty()) {
                     error = "좌표를 찾지 못한 주소: ${failed.joinToString(", ")}"
@@ -115,7 +126,7 @@ fun RouteOptimizerScreen() {
                     try {
                         client.optimize(start, vias, end, roundTrip)
                     } catch (e: Throwable) {
-                        error = "티맵 최적화 실패 → 직선거리 기준으로 대체했습니다. (${e.message})"
+                        error = "$srcName 최적화 실패 → 직선거리 기준으로 대체했습니다. (${e.message})"
                         StraightLineOptimizer.optimize(start, vias, end)
                     }
                 }
@@ -136,18 +147,43 @@ fun RouteOptimizerScreen() {
             ) {
                 Text("최단 경로 설계", fontSize = 26.sp, fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary)
-                Text("여러 주소의 방문 순서를 티맵 실도로 기준으로 최적화합니다.",
+                Text("여러 주소의 방문 순서를 실도로 기준으로 최적화합니다.",
                     fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                 Spacer(Modifier.height(16.dp))
 
-                // 앱키
-                OutlinedTextField(
-                    value = appKey,
-                    onValueChange = { appKey = it; lsSet(KEY_STORE, it.trim()) },
-                    label = { Text("티맵 앱키 (SK open API AppKey)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                // 엔진 선택
+                Text("경로 엔진", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    FilterChip(
+                        selected = provider == Provider.TMAP,
+                        onClick = { provider = Provider.TMAP },
+                        label = { Text("티맵 (키 필요·정확)") },
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    FilterChip(
+                        selected = provider == Provider.OSM,
+                        onClick = { provider = Provider.OSM },
+                        label = { Text("OSM 무료 (키 불필요)") },
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+
+                if (provider == Provider.TMAP) {
+                    OutlinedTextField(
+                        value = appKey,
+                        onValueChange = { appKey = it; lsSet(KEY_STORE, it.trim()) },
+                        label = { Text("티맵 앱키 (SK open API AppKey)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    Text(
+                        "Nominatim(지오코딩) + OSRM(최적화) 공개 서버 사용 — 키 불필요. " +
+                            "공개 데모 서버라 다소 느리고 rate limit·비상업 용도이며, 한국 주소 정확도는 티맵보다 낮을 수 있습니다.",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
                 Spacer(Modifier.height(16.dp))
 
                 Text("방문 주소", fontWeight = FontWeight.SemiBold)
@@ -235,7 +271,11 @@ private fun ResultCard(r: OptimizedRoute) {
             }
             Spacer(Modifier.height(4.dp))
             Text(
-                if (r.source == RouteSource.TMAP) "티맵 실도로 기준" else "직선거리 기준 (근사치)",
+                when (r.source) {
+                    RouteSource.TMAP -> "티맵 실도로 기준"
+                    RouteSource.OSRM -> "OSRM / OSM 실도로 기준 (무료)"
+                    RouteSource.STRAIGHT_LINE -> "직선거리 기준 (근사치)"
+                },
                 fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
             )
             Spacer(Modifier.height(12.dp))
@@ -367,7 +407,11 @@ private fun Metric(label: String, value: String) {
 private data class MapMarker(val lat: Double, val lon: Double, val label: String)
 
 @Serializable
-private data class MapPayload(val markers: List<MapMarker>, val path: List<List<Double>>)
+private data class MapPayload(
+    val engine: String,
+    val markers: List<MapMarker>,
+    val path: List<List<Double>>,
+)
 
 private val mapJson = Json { encodeDefaults = true }
 
@@ -376,7 +420,9 @@ private fun showMap(r: OptimizedRoute) {
         p.coord?.let { MapMarker(it.lat, it.lon, "${i + 1}. ${p.address}") }
     }
     val path = r.polyline.map { listOf(it.lon, it.lat) }
-    roShowMap(mapJson.encodeToString(MapPayload.serializer(), MapPayload(markers, path)))
+    // TMAP 결과는 티맵 JS SDK(키 필요), 그 외(OSRM 등)는 Leaflet+OSM 타일(키 불필요)로 렌더
+    val engine = if (r.source == RouteSource.TMAP) "tmap" else "osm"
+    roShowMap(mapJson.encodeToString(MapPayload.serializer(), MapPayload(engine, markers, path)))
 }
 
 // ---- 포맷 ----
