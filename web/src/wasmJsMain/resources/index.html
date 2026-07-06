@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <title>최단 경로 설계 — 여러 주소 방문순서 최적화</title>
+    <meta name="description" content="여러 주소의 방문 순서를 티맵 실도로 기준으로 자동 최적화하는 웹 앱.">
+    <meta name="theme-color" content="#0B1220">
+    <link rel="preconnect" href="https://apis.openapi.sk.com" crossorigin>
+    <link rel="preload" as="script" href="routeopt-web.js">
+    <style>
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background: #0B1220; color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", sans-serif;
+        }
+        #compose-target { width: 100%; height: 100vh; }
+        /* 로딩 스플래시 */
+        #splash {
+            position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+            flex-direction: column; gap: 14px; background: #0B1220; z-index: 5;
+        }
+        #splash .ring {
+            width: 42px; height: 42px; border: 3px solid #24324a; border-top-color: #3B82F6;
+            border-radius: 50%; animation: spin 0.9s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        /* 지도 오버레이 */
+        #ro-map {
+            position: fixed; inset: 0; z-index: 50; display: none; background: #0B1220;
+        }
+        #ro-map-canvas { position: absolute; inset: 0; }
+        #ro-map-close {
+            position: absolute; top: 12px; right: 12px; z-index: 60;
+            background: #16202E; color: #fff; border: none; border-radius: 8px;
+            padding: 10px 16px; font-size: 15px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.4);
+        }
+        #ro-map-err {
+            position: absolute; top: 60px; left: 12px; right: 12px; z-index: 60;
+            background: #7f1d1d; color: #fff; padding: 10px 12px; border-radius: 8px;
+            font-size: 13px; display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="splash"><div class="ring"></div><div>앱을 불러오는 중…</div></div>
+    <div id="compose-target"></div>
+
+    <!-- 지도 오버레이 (티맵 JS SDK 로 마커 + 실도로 폴리라인 렌더) -->
+    <div id="ro-map">
+        <div id="ro-map-canvas"></div>
+        <div id="ro-map-err"></div>
+        <button id="ro-map-close">닫기 ✕</button>
+    </div>
+
+    <script>
+        // Compose 마운트되면 스플래시 제거
+        (function () {
+            var obs = new MutationObserver(function () {
+                var t = document.getElementById('compose-target');
+                if (t && t.childElementCount > 0) {
+                    var s = document.getElementById('splash');
+                    if (s) s.remove();
+                    obs.disconnect();
+                }
+            });
+            obs.observe(document.getElementById('compose-target'), { childList: true, subtree: true });
+        })();
+
+        document.getElementById('ro-map-close').addEventListener('click', function () {
+            document.getElementById('ro-map').style.display = 'none';
+        });
+
+        var _roMap = null;
+
+        // Kotlin 에서 호출: 최적화 결과(JSON)를 받아 지도에 그린다.
+        // payload = { markers:[{lat,lon,label}], path:[[lon,lat], ...] }
+        window.roShowMap = function (json) {
+            var data;
+            try { data = JSON.parse(json); } catch (e) { return; }
+            var key = (localStorage.getItem('tmap_appkey') || '').trim();
+            var errBox = document.getElementById('ro-map-err');
+            errBox.style.display = 'none';
+
+            document.getElementById('ro-map').style.display = 'block';
+
+            function draw() {
+                var canvas = document.getElementById('ro-map-canvas');
+                canvas.innerHTML = '';
+                var markers = data.markers || [];
+                var center = markers.length > 0
+                    ? new Tmapv2.LatLng(markers[0].lat, markers[0].lon)
+                    : new Tmapv2.LatLng(37.5665, 126.9780);
+                _roMap = new Tmapv2.Map('ro-map-canvas', { center: center, zoom: 12, width: '100%', height: '100%' });
+
+                var bounds = new Tmapv2.LatLngBounds();
+                markers.forEach(function (m, i) {
+                    var pos = new Tmapv2.LatLng(m.lat, m.lon);
+                    new Tmapv2.Marker({ position: pos, map: _roMap, label: String(i + 1), title: m.label });
+                    bounds.extend(pos);
+                });
+
+                var path = (data.path || []).map(function (c) { return new Tmapv2.LatLng(c[1], c[0]); });
+                if (path.length > 1) {
+                    new Tmapv2.Polyline({ path: path, strokeColor: '#3B82F6', strokeWeight: 6, map: _roMap });
+                }
+                if (markers.length > 1) { try { _roMap.fitBounds(bounds); } catch (e) {} }
+            }
+
+            if (typeof Tmapv2 !== 'undefined' && Tmapv2.Map) {
+                draw();
+            } else if (key) {
+                var sc = document.createElement('script');
+                sc.src = 'https://apis.openapi.sk.com/tmap/jsv2?version=1&appKey=' + encodeURIComponent(key);
+                sc.onload = draw;
+                sc.onerror = function () {
+                    errBox.textContent = '티맵 지도 SDK 로드 실패 — 앱키/도메인 등록을 확인하세요.';
+                    errBox.style.display = 'block';
+                };
+                document.head.appendChild(sc);
+            } else {
+                errBox.textContent = '티맵 앱키가 없어 지도를 표시할 수 없습니다.';
+                errBox.style.display = 'block';
+            }
+        };
+    </script>
+    <script src="routeopt-web.js"></script>
+</body>
+</html>
