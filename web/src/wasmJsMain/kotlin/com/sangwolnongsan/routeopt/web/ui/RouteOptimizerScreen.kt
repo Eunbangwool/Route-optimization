@@ -50,6 +50,8 @@ import com.sangwolnongsan.routeopt.web.tmap.TmapClient
 import com.sangwolnongsan.routeopt.web.tmap.lsGet
 import com.sangwolnongsan.routeopt.web.tmap.lsSet
 import com.sangwolnongsan.routeopt.web.tmap.roShowMap
+import com.sangwolnongsan.routeopt.web.util.copyToClipboard
+import com.sangwolnongsan.routeopt.web.util.openUrl
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -272,8 +274,38 @@ private fun ResultCard(r: OptimizedRoute) {
                     Text("지도에서 경로 보기")
                 }
             }
+
+            // 외부 공유: 최적 순서를 지도앱으로 넘기는 다중경유 링크 (API 키 불필요)
+            googleDirUrl(r)?.let { url ->
+                var copied by remember { mutableStateOf(false) }
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    Button(onClick = { openUrl(url) }, modifier = Modifier.weight(1f)) {
+                        Text("구글맵으로 열기")
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(
+                        onClick = { copyToClipboard(url); copied = true },
+                        modifier = Modifier.weight(1f),
+                    ) { Text(if (copied) "복사됨 ✓" else "경로 링크 복사") }
+                }
+                Text(
+                    "최적 순서를 외부 지도앱으로 공유합니다 (API 키 불필요). " +
+                        "국내 자동차 길안내는 지도앱에 따라 제한될 수 있습니다.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
     }
+}
+
+/** 최적 순서 좌표로 구글맵 다중경유 길찾기 URL 생성. 좌표가 2개 미만이면 null. */
+private fun googleDirUrl(r: OptimizedRoute): String? {
+    val coords = r.orderedPlaces.mapNotNull { it.coord }
+    if (coords.size < 2) return null
+    return "https://www.google.com/maps/dir/" + coords.joinToString("/") { "${it.lat},${it.lon}" }
 }
 
 @Composable
