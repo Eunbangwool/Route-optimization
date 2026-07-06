@@ -47,10 +47,23 @@
 # 산출물: web/build/dist/wasmJs/productionExecutable
 ```
 
-## 배포
+## 배포 · 동작 확인
 
-`main` 브랜치 푸시 시 GitHub Actions(`build-web.yml`)가 WASM 빌드 → artifact 생성.
-정적 산출물을 임의의 정적 호스팅(GitHub Pages 등)에 올리면 된다.
+푸시(`main` 또는 `claude/**`) 시 GitHub Actions(`build-web.yml`)가 WASM 빌드 후 산출물을
+`gh-pages` 브랜치로 배포한다.
+
+**최초 1회 설정**: 저장소 **Settings → Pages → Source** 를 `Deploy from a branch` →
+브랜치 `gh-pages` / `(root)` 로 지정. (첫 빌드가 `gh-pages` 브랜치를 만든 뒤 설정 가능)
+
+이후 접속 URL:
+
+```
+https://eunbangwool.github.io/Route-optimization/
+```
+
+**빠른 동작 확인 (키 불필요)**: 상단에서 `OSM 무료` 선택 → 주소 3~4개 입력
+(예: `서울역`, `강남역`, `여의도`, `잠실역`) → `최적 경로 계산` → 순서·거리/시간 확인 →
+`지도에서 경로 보기` → `네이버 지도로 열기`(모바일).
 
 ## 알려진 제한
 
