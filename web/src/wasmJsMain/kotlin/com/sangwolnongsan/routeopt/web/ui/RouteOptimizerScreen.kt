@@ -49,8 +49,8 @@ import com.sangwolnongsan.routeopt.optimize.StraightLineOptimizer
 import com.sangwolnongsan.routeopt.web.tmap.TmapClient
 import com.sangwolnongsan.routeopt.web.tmap.lsGet
 import com.sangwolnongsan.routeopt.web.tmap.lsSet
+import com.sangwolnongsan.routeopt.web.tmap.encodeURIComponent
 import com.sangwolnongsan.routeopt.web.tmap.roShowMap
-import com.sangwolnongsan.routeopt.web.util.copyToClipboard
 import com.sangwolnongsan.routeopt.web.util.openUrl
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -275,23 +275,40 @@ private fun ResultCard(r: OptimizedRoute) {
                 }
             }
 
-            // 외부 공유: 최적 순서를 지도앱으로 넘기는 다중경유 링크 (API 키 불필요)
-            googleDirUrl(r)?.let { url ->
-                var copied by remember { mutableStateOf(false) }
+            // 외부 공유: 최적 순서를 국내 지도앱으로 넘기기 (API 키 불필요, 모바일 앱 스킴)
+            val withCoords = r.orderedPlaces.filter { it.coord != null }
+            if (withCoords.size >= 2) {
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(12.dp))
+                Text("지도앱으로 안내 시작", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth()) {
-                    Button(onClick = { openUrl(url) }, modifier = Modifier.weight(1f)) {
-                        Text("구글맵으로 열기")
+
+                naverUrl(r)?.let { url ->
+                    Button(onClick = { openUrl(url) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("네이버 지도로 열기 (경유지 포함)")
                     }
-                    Spacer(Modifier.width(8.dp))
-                    OutlinedButton(
-                        onClick = { copyToClipboard(url); copied = true },
-                        modifier = Modifier.weight(1f),
-                    ) { Text(if (copied) "복사됨 ✓" else "경로 링크 복사") }
+                    Spacer(Modifier.height(8.dp))
                 }
+                Row(Modifier.fillMaxWidth()) {
+                    tmapUrl(r)?.let { url ->
+                        OutlinedButton(onClick = { openUrl(url) }, modifier = Modifier.weight(1f)) {
+                            Text("티맵 (도착지)")
+                        }
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    kakaoUrl(r)?.let { url ->
+                        OutlinedButton(onClick = { openUrl(url) }, modifier = Modifier.weight(1f)) {
+                            Text("카카오맵 (출발·도착)")
+                        }
+                    }
+                }
+                val midCount = withCoords.size - 2
                 Text(
-                    "최적 순서를 외부 지도앱으로 공유합니다 (API 키 불필요). " +
-                        "국내 자동차 길안내는 지도앱에 따라 제한될 수 있습니다.",
+                    buildString {
+                        append("모바일에서 해당 앱 설치 시 동작합니다 (API 키 불필요).")
+                        if (midCount > 5) append(" 네이버는 경유지 5개까지만 전달됩니다(현재 $midCount 개).")
+                    },
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                     modifier = Modifier.padding(top = 4.dp),
@@ -301,11 +318,40 @@ private fun ResultCard(r: OptimizedRoute) {
     }
 }
 
-/** 최적 순서 좌표로 구글맵 다중경유 길찾기 URL 생성. 좌표가 2개 미만이면 null. */
-private fun googleDirUrl(r: OptimizedRoute): String? {
-    val coords = r.orderedPlaces.mapNotNull { it.coord }
-    if (coords.size < 2) return null
-    return "https://www.google.com/maps/dir/" + coords.joinToString("/") { "${it.lat},${it.lon}" }
+private fun enc(s: String): String = encodeURIComponent(s)
+
+/** 네이버 지도 앱 스킴: 출발 + 경유지(최대 5) + 도착. 좌표 2개 미만이면 null. */
+private fun naverUrl(r: OptimizedRoute): String? {
+    val pts = r.orderedPlaces.filter { it.coord != null }
+    if (pts.size < 2) return null
+    val s = pts.first().coord!!
+    val d = pts.last().coord!!
+    val sb = StringBuilder("nmap://route/car?")
+    sb.append("slat=${s.lat}&slng=${s.lon}&sname=${enc(pts.first().address)}")
+    pts.subList(1, pts.size - 1).take(5).forEachIndexed { i, p ->
+        val n = i + 1
+        val c = p.coord!!
+        sb.append("&v${n}lat=${c.lat}&v${n}lng=${c.lon}&v${n}name=${enc(p.address)}")
+    }
+    sb.append("&dlat=${d.lat}&dlng=${d.lon}&dname=${enc(pts.last().address)}")
+    sb.append("&appname=com.sangwolnongsan.routeopt")
+    return sb.toString()
+}
+
+/** 티맵 앱 스킴: 최종 목적지 안내. */
+private fun tmapUrl(r: OptimizedRoute): String? {
+    val d = r.orderedPlaces.lastOrNull { it.coord != null } ?: return null
+    val c = d.coord!!
+    return "tmap://route?goalname=${enc(d.address)}&goalx=${c.lon}&goaly=${c.lat}"
+}
+
+/** 카카오맵 앱 스킴: 출발→도착(경유지 미지원). */
+private fun kakaoUrl(r: OptimizedRoute): String? {
+    val pts = r.orderedPlaces.filter { it.coord != null }
+    if (pts.size < 2) return null
+    val s = pts.first().coord!!
+    val d = pts.last().coord!!
+    return "kakaomap://route?sp=${s.lat},${s.lon}&ep=${d.lat},${d.lon}&by=CAR"
 }
 
 @Composable
