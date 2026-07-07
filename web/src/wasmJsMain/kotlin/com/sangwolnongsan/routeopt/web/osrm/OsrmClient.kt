@@ -35,28 +35,27 @@ class OsrmClient : RouteProvider {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val nominatim = "https://nominatim.openstreetmap.org"
     private val osrm = "https://router.project-osrm.org"
-    private val photon = "https://photon.komoot.io"
 
-    /** Photon(OSM) 자동완성 검색 — 키 불필요, 타입어헤드용. */
+    /**
+     * Nominatim(OSM) 자동완성 검색 — 키 불필요. accept-language=ko 로 한국어 결과,
+     * countrycodes=kr 로 한국 한정. 공개 서버 정책상 과도한 요청 금지(디바운스 사용).
+     */
     override suspend fun search(query: String): List<Suggestion> {
         val enc = com.sangwolnongsan.routeopt.web.tmap.encodeURIComponent(query)
-        val url = "$photon/api/?q=$enc&limit=6"
+        val url = "$nominatim/search?format=jsonv2&accept-language=ko&countrycodes=kr&limit=6&q=$enc"
         val text = httpGetText(url).await<JsString>().toString()
-        val feats = runCatching {
-            json.parseToJsonElement(text).jsonObject["features"]?.jsonArray
-        }.getOrNull() ?: return emptyList()
-        return feats.mapNotNull { f ->
-            val o = f.jsonObject
-            val coords = o["geometry"]?.jsonObject?.get("coordinates")?.jsonArray ?: return@mapNotNull null
-            val lon = coords.getOrNull(0)?.jsonPrimitive?.doubleOrNull ?: return@mapNotNull null
-            val lat = coords.getOrNull(1)?.jsonPrimitive?.doubleOrNull ?: return@mapNotNull null
-            val p = o["properties"]?.jsonObject ?: return@mapNotNull null
-            fun s(k: String) = p[k]?.jsonPrimitive?.contentOrNull
-            val street = listOfNotNull(s("street"), s("housenumber")).joinToString(" ").ifBlank { null }
-            val label = s("name") ?: street ?: s("city") ?: s("district") ?: "(이름 없음)"
-            val sub = listOfNotNull(s("district"), s("city"), s("state"), s("country"))
-                .distinct().joinToString(" ").ifBlank { null }
-            Suggestion(label = label, sub = sub, coord = LatLng(lat, lon))
+        val arr = runCatching { json.parseToJsonElement(text).jsonArray }.getOrNull() ?: return emptyList()
+        return arr.mapNotNull { el ->
+            val o = el.jsonObject
+            val lat = o["lat"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: return@mapNotNull null
+            val lon = o["lon"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: return@mapNotNull null
+            val disp = o["display_name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val name = o["name"]?.jsonPrimitive?.contentOrNull?.ifBlank { null }
+            Suggestion(
+                label = name ?: disp.substringBefore(",").trim(),
+                sub = disp,
+                coord = LatLng(lat, lon),
+            )
         }
     }
 

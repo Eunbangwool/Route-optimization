@@ -257,7 +257,7 @@ private fun AddressRowItem(
         if (row.picked != null) return@LaunchedEffect
         val q = row.query.trim()
         if (q.length < 2) { row.suggestions = emptyList(); return@LaunchedEffect }
-        delay(350)
+        delay(500)
         row.searching = true
         row.suggestions = runCatching { client.search(q) }.getOrDefault(emptyList())
         row.searching = false
