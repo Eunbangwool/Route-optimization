@@ -43,7 +43,11 @@
     </style>
 </head>
 <body>
-    <div id="splash"><div class="ring"></div><div>앱을 불러오는 중…</div></div>
+    <div id="splash">
+        <div class="ring" id="splash-ring"></div>
+        <div id="splash-msg" style="max-width:88%; text-align:center; line-height:1.5;">앱을 불러오는 중…</div>
+        <button id="splash-reload" style="display:none; margin-top:6px; background:#3B82F6; color:#fff; border:none; border-radius:8px; padding:10px 18px; font-size:14px; cursor:pointer;">새로고침</button>
+    </div>
     <div id="compose-target"></div>
 
     <!-- 지도 오버레이 (티맵 JS SDK 로 마커 + 실도로 폴리라인 렌더) -->
@@ -54,17 +58,34 @@
     </div>
 
     <script>
-        // Compose 마운트되면 스플래시 제거
+        // 스플래시: Compose 마운트되면 제거, 오류/지연이면 원인 표시 (무한 스피너 방지)
         (function () {
+            var target = document.getElementById('compose-target');
+            var mounted = false;
+            function hide() { var s = document.getElementById('splash'); if (s) s.remove(); }
+            function fail(msg) {
+                if (mounted) return;
+                var r = document.getElementById('splash-ring'); if (r) r.style.display = 'none';
+                var m = document.getElementById('splash-msg'); if (m) { m.innerHTML = msg; m.style.fontSize = '13px'; }
+                var b = document.getElementById('splash-reload'); if (b) b.style.display = 'inline-block';
+            }
+            var BROWSER_HINT = '<br><br>Kotlin/WASM 앱은 <b>최신 Chrome·Edge·Firefox 또는 Safari 18.2+</b> 에서만 동작합니다. ' +
+                '카카오톡·인스타 등 <b>인앱 브라우저</b>에서는 열리지 않을 수 있어요 — 우측 상단 메뉴에서 <b>“다른 브라우저로 열기”</b>(크롬/사파리)를 사용하세요.';
             var obs = new MutationObserver(function () {
-                var t = document.getElementById('compose-target');
-                if (t && t.childElementCount > 0) {
-                    var s = document.getElementById('splash');
-                    if (s) s.remove();
-                    obs.disconnect();
-                }
+                if (target && target.childElementCount > 0) { mounted = true; hide(); obs.disconnect(); }
             });
-            obs.observe(document.getElementById('compose-target'), { childList: true, subtree: true });
+            obs.observe(target, { childList: true, subtree: true });
+            window.addEventListener('error', function (e) {
+                fail('앱 로드 오류: ' + ((e && e.message) || e) + BROWSER_HINT);
+            });
+            window.addEventListener('unhandledrejection', function (e) {
+                fail('앱 로드 오류: ' + ((e && e.reason && (e.reason.message || e.reason)) || '알 수 없음') + BROWSER_HINT);
+            });
+            setTimeout(function () {
+                fail('로드가 지연되고 있습니다. 네트워크를 확인하고 새로고침하세요.' + BROWSER_HINT);
+            }, 20000);
+            var rb = document.getElementById('splash-reload');
+            if (rb) rb.addEventListener('click', function () { location.reload(); });
         })();
 
         document.getElementById('ro-map-close').addEventListener('click', function () {
