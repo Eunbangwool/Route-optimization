@@ -43,10 +43,18 @@ kotlin {
                 implementation(compose.material3)
                 implementation(compose.materialIconsExtended)
                 implementation(compose.ui)
+                implementation(compose.components.resources)
                 implementation(libs.kotlinx.serialization.json)
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(project(":shared"))
             }
         }
     }
+}
+
+// 한글 폰트 등 Compose 리소스 접근자(Res) 생성
+compose.resources {
+    publicResClass = false
+    packageOfResClass = "com.sangwolnongsan.routeopt.web.resources"
+    generateResClass = always
 }

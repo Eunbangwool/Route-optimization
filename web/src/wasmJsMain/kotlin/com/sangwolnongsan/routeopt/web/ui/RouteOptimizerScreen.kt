@@ -69,7 +69,7 @@ private enum class Provider { TMAP, OSM }
 fun RouteOptimizerScreen() {
     val scope = rememberCoroutineScope()
 
-    var provider by remember { mutableStateOf(Provider.TMAP) }
+    var provider by remember { mutableStateOf(Provider.OSM) }
     var appKey by remember { mutableStateOf(lsGet(KEY_STORE)) }
     val addresses = remember { mutableStateListOf("", "") }
     var roundTrip by remember { mutableStateOf(false) }
