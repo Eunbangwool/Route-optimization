@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -31,6 +32,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -49,6 +51,7 @@ import com.sangwolnongsan.routeopt.model.RouteSource
 import com.sangwolnongsan.routeopt.optimize.StraightLineOptimizer
 import com.sangwolnongsan.routeopt.web.osrm.OsrmClient
 import com.sangwolnongsan.routeopt.web.route.RouteProvider
+import com.sangwolnongsan.routeopt.web.route.Suggestion
 import com.sangwolnongsan.routeopt.web.tmap.TmapClient
 import com.sangwolnongsan.routeopt.web.tmap.lsGet
 import com.sangwolnongsan.routeopt.web.tmap.lsSet
@@ -65,13 +68,21 @@ private const val KEY_STORE = "tmap_appkey"
 
 private enum class Provider { TMAP, OSM }
 
+/** 검색어·선택결과를 담는 주소 행. 각 필드는 상태라 변경 시 재구성된다. */
+private class AddressRow {
+    var query by mutableStateOf("")
+    var picked by mutableStateOf<Suggestion?>(null)
+    var suggestions by mutableStateOf<List<Suggestion>>(emptyList())
+    var searching by mutableStateOf(false)
+}
+
 @Composable
 fun RouteOptimizerScreen() {
     val scope = rememberCoroutineScope()
 
     var provider by remember { mutableStateOf(Provider.OSM) }
     var appKey by remember { mutableStateOf(lsGet(KEY_STORE)) }
-    val addresses = remember { mutableStateListOf("", "") }
+    val rows = remember { mutableStateListOf(AddressRow(), AddressRow()) }
     var roundTrip by remember { mutableStateOf(false) }
 
     var busy by remember { mutableStateOf(false) }
@@ -79,54 +90,40 @@ fun RouteOptimizerScreen() {
     var error by remember { mutableStateOf<String?>(null) }
     var result by remember { mutableStateOf<OptimizedRoute?>(null) }
 
+    // 엔진/키 바뀌면 검색 클라이언트 재생성
+    val client: RouteProvider = remember(provider, appKey) {
+        if (provider == Provider.OSM) OsrmClient() else TmapClient(appKey.trim())
+    }
+
     fun runOptimize() {
         error = null
         result = null
-        val key = appKey.trim()
         val osm = provider == Provider.OSM
-        val queries = addresses.map { it.trim() }.filter { it.isNotEmpty() }
-        when {
-            !osm && key.isEmpty() -> { error = "티맵 앱키를 입력하거나 OSM 무료 모드를 선택하세요."; return }
-            queries.size < 2 -> { error = "주소를 2개 이상 입력하세요."; return }
+        if (!osm && appKey.trim().isEmpty()) {
+            error = "티맵 앱키를 입력하거나 OSM 무료 모드를 선택하세요."; return
+        }
+        // 검색 후 선택(picked)된 지점만 사용
+        val places = rows.mapIndexedNotNull { i, row ->
+            row.picked?.let { Place(id = "p$i", address = it.label, coord = it.coord, resolvedName = it.sub) }
+        }
+        if (places.size < 2) {
+            error = "검색해서 목록에서 주소를 2개 이상 선택하세요."; return
         }
         busy = true
         scope.launch {
             try {
-                val client: RouteProvider = if (osm) OsrmClient() else TmapClient(key)
-                val srcName = if (osm) "OSM" else "티맵"
-                val places = ArrayList<Place>()
-                val failed = ArrayList<String>()
-                queries.forEachIndexed { i, q ->
-                    status = "주소 변환 중 (${i + 1}/${queries.size}): $q"
-                    val geo = runCatching { client.geocode(q) }.getOrNull()
-                    if (geo == null) {
-                        failed.add(q)
-                    } else {
-                        places.add(Place(id = "p$i", address = q, coord = geo.first, resolvedName = geo.second))
-                    }
-                    // Nominatim 공개 서버 rate limit(≈1/s) 준수
-                    if (osm && i < queries.lastIndex) delay(1100)
-                }
-                if (failed.isNotEmpty()) {
-                    error = "좌표를 찾지 못한 주소: ${failed.joinToString(", ")}"
-                }
-                if (places.size < 2) {
-                    busy = false; status = null; return@launch
-                }
-
                 val start = places.first()
                 val end = if (roundTrip) start else places.last()
                 val vias = if (roundTrip) places.drop(1) else places.subList(1, places.size - 1).toList()
 
                 status = "최적 경로 계산 중…"
                 result = if (vias.isEmpty()) {
-                    // 경유지가 없으면 직선거리로 단일 구간 계산
                     StraightLineOptimizer.optimize(start, emptyList(), end)
                 } else {
                     try {
                         client.optimize(start, vias, end, roundTrip)
                     } catch (e: Throwable) {
-                        error = "$srcName 최적화 실패 → 직선거리 기준으로 대체했습니다. (${e.message})"
+                        error = "${if (osm) "OSRM" else "티맵"} 최적화 실패 → 직선거리 기준으로 대체했습니다. (${e.message})"
                         StraightLineOptimizer.optimize(start, vias, end)
                     }
                 }
@@ -186,35 +183,24 @@ fun RouteOptimizerScreen() {
                 }
                 Spacer(Modifier.height(16.dp))
 
-                Text("방문 주소", fontWeight = FontWeight.SemiBold)
+                Text("방문 주소 (검색 후 선택)", fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
-                addresses.forEachIndexed { i, value ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        val badge = when {
-                            i == 0 -> "출발"
-                            !roundTrip && i == addresses.lastIndex -> "도착"
-                            else -> "${i}"
-                        }
-                        Box(Modifier.width(44.dp)) {
-                            Text(badge, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary)
-                        }
-                        OutlinedTextField(
-                            value = value,
-                            onValueChange = { addresses[i] = it },
-                            placeholder = { Text("주소 또는 장소명") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(
-                            onClick = { if (addresses.size > 2) addresses.removeAt(i) },
-                            enabled = addresses.size > 2,
-                        ) { Icon(Icons.Default.Close, contentDescription = "삭제") }
+                rows.forEachIndexed { i, row ->
+                    val badge = when {
+                        i == 0 -> "출발"
+                        !roundTrip && i == rows.lastIndex -> "도착"
+                        else -> "$i"
                     }
+                    AddressRowItem(
+                        row = row,
+                        badge = badge,
+                        client = client,
+                        canDelete = rows.size > 2,
+                        onDelete = { if (rows.size > 2) rows.removeAt(i) },
+                    )
                 }
                 Spacer(Modifier.height(4.dp))
-                OutlinedButton(onClick = { addresses.add("") }) {
+                OutlinedButton(onClick = { rows.add(AddressRow()) }) {
                     Icon(Icons.Default.Add, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text("주소 추가")
@@ -252,6 +238,82 @@ fun RouteOptimizerScreen() {
                 result?.let { r ->
                     Spacer(Modifier.height(20.dp))
                     ResultCard(r)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddressRowItem(
+    row: AddressRow,
+    badge: String,
+    client: RouteProvider,
+    canDelete: Boolean,
+    onDelete: () -> Unit,
+) {
+    // 디바운스 검색: query 변경 시 350ms 후 검색 (picked 상태면 검색 안 함)
+    LaunchedEffect(row.query, client) {
+        if (row.picked != null) return@LaunchedEffect
+        val q = row.query.trim()
+        if (q.length < 2) { row.suggestions = emptyList(); return@LaunchedEffect }
+        delay(350)
+        row.searching = true
+        row.suggestions = runCatching { client.search(q) }.getOrDefault(emptyList())
+        row.searching = false
+    }
+
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(44.dp)) {
+                Text(badge, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary)
+            }
+            OutlinedTextField(
+                value = row.query,
+                onValueChange = { row.query = it; row.picked = null },
+                placeholder = { Text("주소·장소 검색") },
+                singleLine = true,
+                trailingIcon = if (row.searching) {
+                    { CircularProgressIndicator(Modifier.width(18.dp).height(18.dp), strokeWidth = 2.dp) }
+                } else null,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onDelete, enabled = canDelete) {
+                Icon(Icons.Default.Close, contentDescription = "삭제")
+            }
+        }
+
+        if (row.picked != null) {
+            Text(
+                "✓ 선택됨" + (row.picked!!.sub?.let { " · $it" } ?: ""),
+                fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.padding(start = 44.dp, top = 2.dp),
+            )
+        } else if (row.suggestions.isNotEmpty()) {
+            Card(
+                Modifier.fillMaxWidth().padding(start = 44.dp, top = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            ) {
+                Column {
+                    row.suggestions.forEachIndexed { idx, s ->
+                        Column(
+                            Modifier.fillMaxWidth()
+                                .clickable {
+                                    row.picked = s
+                                    row.query = s.label
+                                    row.suggestions = emptyList()
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                        ) {
+                            Text(s.label, fontSize = 14.sp)
+                            s.sub?.let {
+                                Text(it, fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
+                            }
+                        }
+                        if (idx < row.suggestions.lastIndex) HorizontalDivider()
+                    }
                 }
             }
         }

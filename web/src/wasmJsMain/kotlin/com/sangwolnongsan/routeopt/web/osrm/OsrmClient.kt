@@ -8,10 +8,12 @@ import com.sangwolnongsan.routeopt.model.Place
 import com.sangwolnongsan.routeopt.model.RouteLeg
 import com.sangwolnongsan.routeopt.model.RouteSource
 import com.sangwolnongsan.routeopt.web.route.RouteProvider
+import com.sangwolnongsan.routeopt.web.route.Suggestion
 import com.sangwolnongsan.routeopt.web.util.httpGetText
 import kotlin.js.JsString
 import kotlinx.coroutines.await
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -33,6 +35,30 @@ class OsrmClient : RouteProvider {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val nominatim = "https://nominatim.openstreetmap.org"
     private val osrm = "https://router.project-osrm.org"
+    private val photon = "https://photon.komoot.io"
+
+    /** Photon(OSM) 자동완성 검색 — 키 불필요, 타입어헤드용. */
+    override suspend fun search(query: String): List<Suggestion> {
+        val enc = com.sangwolnongsan.routeopt.web.tmap.encodeURIComponent(query)
+        val url = "$photon/api/?q=$enc&limit=6"
+        val text = httpGetText(url).await<JsString>().toString()
+        val feats = runCatching {
+            json.parseToJsonElement(text).jsonObject["features"]?.jsonArray
+        }.getOrNull() ?: return emptyList()
+        return feats.mapNotNull { f ->
+            val o = f.jsonObject
+            val coords = o["geometry"]?.jsonObject?.get("coordinates")?.jsonArray ?: return@mapNotNull null
+            val lon = coords.getOrNull(0)?.jsonPrimitive?.doubleOrNull ?: return@mapNotNull null
+            val lat = coords.getOrNull(1)?.jsonPrimitive?.doubleOrNull ?: return@mapNotNull null
+            val p = o["properties"]?.jsonObject ?: return@mapNotNull null
+            fun s(k: String) = p[k]?.jsonPrimitive?.contentOrNull
+            val street = listOfNotNull(s("street"), s("housenumber")).joinToString(" ").ifBlank { null }
+            val label = s("name") ?: street ?: s("city") ?: s("district") ?: "(이름 없음)"
+            val sub = listOfNotNull(s("district"), s("city"), s("state"), s("country"))
+                .distinct().joinToString(" ").ifBlank { null }
+            Suggestion(label = label, sub = sub, coord = LatLng(lat, lon))
+        }
+    }
 
     override suspend fun geocode(query: String): Pair<LatLng, String?>? {
         val enc = encode(query)

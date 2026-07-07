@@ -8,6 +8,7 @@ import com.sangwolnongsan.routeopt.model.Place
 import com.sangwolnongsan.routeopt.model.RouteLeg
 import com.sangwolnongsan.routeopt.model.RouteSource
 import com.sangwolnongsan.routeopt.web.route.RouteProvider
+import com.sangwolnongsan.routeopt.web.route.Suggestion
 import kotlinx.coroutines.await
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -31,6 +32,27 @@ class TmapClient(private val appKey: String) : RouteProvider {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val base = "https://apis.openapi.sk.com/tmap"
+
+    /** 티맵 POI 통합검색 → 후보 목록 (자동완성). */
+    override suspend fun search(query: String): List<Suggestion> {
+        val enc = encodeURIComponent(query)
+        val url = "$base/pois?version=1&format=json&count=6&searchKeyword=$enc"
+        val text = tmapGet(url, appKey).await<JsString>().toString()
+        val pois = runCatching {
+            json.parseToJsonElement(text).jsonObject["searchPoiInfo"]?.jsonObject
+                ?.get("pois")?.jsonObject?.get("poi")?.jsonArray
+        }.getOrNull() ?: return emptyList()
+        return pois.mapNotNull { el ->
+            val o = el.jsonObject
+            val lat = o.dbl("noorLat") ?: o.dbl("frontLat") ?: return@mapNotNull null
+            val lon = o.dbl("noorLon") ?: o.dbl("frontLon") ?: return@mapNotNull null
+            val name = o.str("name") ?: return@mapNotNull null
+            val addr = listOfNotNull(
+                o.str("upperAddrName"), o.str("middleAddrName"), o.str("lowerAddrName"),
+            ).joinToString(" ").ifBlank { null }
+            Suggestion(label = name, sub = addr, coord = LatLng(lat, lon))
+        }
+    }
 
     /** 주소/장소명 → 좌표. 매칭 실패 시 null. */
     override suspend fun geocode(query: String): Pair<LatLng, String?>? {
