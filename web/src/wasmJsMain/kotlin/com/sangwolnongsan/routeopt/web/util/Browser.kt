@@ -2,6 +2,10 @@
 
 package com.sangwolnongsan.routeopt.web.util
 
+/** Compose 첫 프레임 진입 시 호출 → index.html 의 로딩 스플래시 제거. */
+@JsFun("() => { if (window.roAppReady) window.roAppReady(); }")
+external fun roAppReady()
+
 /** 새 탭으로 URL 열기 (외부 지도앱 핸드오프). */
 @JsFun("(url) => { window.open(url, '_blank', 'noopener'); }")
 external fun openUrl(url: String)
