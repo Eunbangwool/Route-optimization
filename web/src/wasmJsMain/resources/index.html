@@ -47,6 +47,7 @@
         <div class="ring" id="splash-ring"></div>
         <div id="splash-msg" style="max-width:88%; text-align:center; line-height:1.5;">앱을 불러오는 중…</div>
         <button id="splash-reload" style="display:none; margin-top:6px; background:#3B82F6; color:#fff; border:none; border-radius:8px; padding:10px 18px; font-size:14px; cursor:pointer;">새로고침</button>
+        <pre id="splash-log" style="display:none; max-width:92%; max-height:40vh; overflow:auto; white-space:pre-wrap; word-break:break-all; background:#111a29; color:#ffd7d7; font-size:11px; padding:10px; border-radius:8px; margin-top:10px;"></pre>
     </div>
     <div id="compose-target"></div>
 
@@ -69,21 +70,41 @@
                 var m = document.getElementById('splash-msg'); if (m) { m.innerHTML = msg; m.style.fontSize = '13px'; }
                 var b = document.getElementById('splash-reload'); if (b) b.style.display = 'inline-block';
             }
-            var BROWSER_HINT = '<br><br>Kotlin/WASM 앱은 <b>최신 Chrome·Edge·Firefox 또는 Safari 18.2+</b> 에서만 동작합니다. ' +
-                '카카오톡·인스타 등 <b>인앱 브라우저</b>에서는 열리지 않을 수 있어요 — 우측 상단 메뉴에서 <b>“다른 브라우저로 열기”</b>(크롬/사파리)를 사용하세요.';
+            var BROWSER_HINT = '<br><br>안 되면 아래 로그를 복사해서 개발자에게 전달해 주세요.';
+            var logEl = document.getElementById('splash-log');
+            function appendLog(prefix, args) {
+                if (!logEl) return;
+                try {
+                    var parts = Array.prototype.map.call(args, function (a) {
+                        if (a && a.stack) return String(a.stack);
+                        if (a && typeof a === 'object') { try { return JSON.stringify(a); } catch (e) { return String(a); } }
+                        return String(a);
+                    });
+                    logEl.style.display = 'block';
+                    logEl.textContent += prefix + ' ' + parts.join(' ') + '\n';
+                } catch (e) {}
+            }
+            // 콘솔 오류/경고를 화면에도 미러링 (skiko/wasm 내부 오류 포착용)
+            var _ce = console.error ? console.error.bind(console) : function () {};
+            var _cw = console.warn ? console.warn.bind(console) : function () {};
+            console.error = function () { appendLog('ERR', arguments); _ce.apply(null, arguments); };
+            console.warn = function () { appendLog('WARN', arguments); _cw.apply(null, arguments); };
+
             var obs = new MutationObserver(function () {
                 if (target && target.childElementCount > 0) { mounted = true; hide(); obs.disconnect(); }
             });
             obs.observe(target, { childList: true, subtree: true });
             window.addEventListener('error', function (e) {
+                appendLog('WINDOW-ERR', [((e && e.message) || e), (e && e.filename) || '', (e && e.lineno) || '']);
                 fail('앱 로드 오류: ' + ((e && e.message) || e) + BROWSER_HINT);
             });
             window.addEventListener('unhandledrejection', function (e) {
+                appendLog('REJECT', [(e && e.reason) || 'unknown']);
                 fail('앱 로드 오류: ' + ((e && e.reason && (e.reason.message || e.reason)) || '알 수 없음') + BROWSER_HINT);
             });
             setTimeout(function () {
-                fail('로드가 지연되고 있습니다. 네트워크를 확인하고 새로고침하세요.' + BROWSER_HINT);
-            }, 20000);
+                fail('로드가 지연되거나 실패했습니다.' + BROWSER_HINT);
+            }, 30000);
             var rb = document.getElementById('splash-reload');
             if (rb) rb.addEventListener('click', function () { location.reload(); });
         })();
