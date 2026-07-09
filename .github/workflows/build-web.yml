@@ -86,8 +86,10 @@ jobs:
       # GitHub Pages 배포: 산출물을 gh-pages 브랜치로 강제 푸시.
       # Settings → Pages → Source = "Deploy from a branch" → gh-pages / (root) 로 한 번 설정하면
       # https://eunbangwool.github.io/Route-optimization/ 에서 서빙된다.
+      # ⚠️ 배포는 main 에서만. claude/** 브랜치는 빌드·검증만 하고 배포하지 않음
+      #    (여러 작업 브랜치가 같은 gh-pages 를 덮어쓰는 충돌 방지).
       - name: 🚀 GitHub Pages 배포 (gh-pages 브랜치)
-        if: success() && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/claude/'))
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
