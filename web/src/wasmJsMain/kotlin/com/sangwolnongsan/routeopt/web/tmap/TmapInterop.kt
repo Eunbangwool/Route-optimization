@@ -4,6 +4,7 @@ package com.sangwolnongsan.routeopt.web.tmap
 
 import kotlin.js.JsString
 import kotlin.js.Promise
+import kotlinx.coroutines.await
 
 /**
  * 티맵 REST 호출과 브라우저 저장소를 위한 최소한의 JS interop.
@@ -49,3 +50,24 @@ external fun lsSet(key: String, value: String)
  */
 @JsFun("(json) => window.roShowMap(json)")
 external fun roShowMap(json: String)
+
+/** URL 컴포넌트 디코딩 (공유 링크 해시 복원용). */
+@JsFun("(s) => decodeURIComponent(s)")
+external fun decodeURIComponent(s: String): String
+
+/** 현재 페이지 기본 URL(origin+pathname) — 공유 링크 생성용. */
+@JsFun("() => window.location.origin + window.location.pathname")
+external fun locationBaseUrl(): String
+
+/** 현재 URL 해시(# 포함, 없으면 빈 문자열). */
+@JsFun("() => (window.location.hash || '')")
+external fun locationHash(): String
+
+@JsFun("(url) => window.roShareUrl(url)")
+external fun roShareUrlJs(url: String): Promise<JsString>
+
+/**
+ * 공유 링크 전달 — 모바일은 OS 공유시트(Web Share API), 그 외 클립보드 복사.
+ * @return "shared" | "copied" | "cancelled" | "failed"
+ */
+suspend fun shareUrl(url: String): String = roShareUrlJs(url).await<JsString>().toString()

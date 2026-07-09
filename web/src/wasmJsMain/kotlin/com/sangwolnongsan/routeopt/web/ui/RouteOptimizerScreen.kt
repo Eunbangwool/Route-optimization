@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -59,10 +60,14 @@ import com.sangwolnongsan.routeopt.web.data.SavedRoutes
 import com.sangwolnongsan.routeopt.web.osrm.OsrmClient
 import com.sangwolnongsan.routeopt.web.route.RouteProvider
 import com.sangwolnongsan.routeopt.web.route.Suggestion
+import com.sangwolnongsan.routeopt.web.tmap.decodeURIComponent
 import com.sangwolnongsan.routeopt.web.tmap.encodeURIComponent
+import com.sangwolnongsan.routeopt.web.tmap.locationBaseUrl
+import com.sangwolnongsan.routeopt.web.tmap.locationHash
 import com.sangwolnongsan.routeopt.web.tmap.lsGet
 import com.sangwolnongsan.routeopt.web.tmap.lsSet
 import com.sangwolnongsan.routeopt.web.tmap.roShowMap
+import com.sangwolnongsan.routeopt.web.tmap.shareUrl
 import com.sangwolnongsan.routeopt.web.util.isMobileDevice
 import com.sangwolnongsan.routeopt.web.util.jsConfirm
 import com.sangwolnongsan.routeopt.web.util.jsPrompt
@@ -96,6 +101,8 @@ fun RouteOptimizerScreen() {
     var result by remember { mutableStateOf<OptimizedRoute?>(null) }
     // 여러 경로 후보 중 사용자가 고른 것 (0 = 추천). result 가 바뀌면 0 으로 초기화.
     var selectedAlt by remember { mutableStateOf(0) }
+    // 공유 링크로 열었을 때 복원할 후보 인덱스 (계산 완료 후 1회 적용).
+    var pendingAlt by remember { mutableStateOf(0) }
     var saved by remember { mutableStateOf(SavedRoutes.load()) }
     var showAdvanced by remember { mutableStateOf(false) }
     var osrmBase by remember { mutableStateOf(lsGet("osrm_base")) }
@@ -118,6 +125,26 @@ fun RouteOptimizerScreen() {
         val next = listOf(SavedRoute(name, roundTrip, places)) + saved.filterNot { it.name == name }
         SavedRoutes.persist(next)
         saved = next
+    }
+
+    fun shareCurrent() {
+        error = null
+        val places = pickedPlaces()
+        if (places.size < 2) { error = "공유하려면 지점을 2개 이상 선택하세요."; return }
+        val payload = SharePayload(roundTrip = roundTrip, alt = selectedAlt, places = places)
+        val url = locationBaseUrl() + "#r=" +
+            encodeURIComponent(shareJson.encodeToString(SharePayload.serializer(), payload))
+        scope.launch {
+            when (shareUrl(url)) {
+                "copied" -> {
+                    status = "공유 링크를 클립보드에 복사했습니다. 붙여넣기 하세요."
+                    delay(4000)
+                    if (status?.startsWith("공유 링크") == true) status = null
+                }
+                "failed" -> error = "공유 실패 — 링크를 복사할 수 없습니다."
+                else -> {} // shared(공유시트 완료) / cancelled(사용자 취소)
+            }
+        }
     }
 
     fun loadRoute(sr: SavedRoute) {
@@ -168,6 +195,10 @@ fun RouteOptimizerScreen() {
                     error = "실도로 최적화 실패 → 직선거리 기준으로 대체했습니다. (${e.message})"
                     StraightLineOptimizer.optimize(start, vias, end)
                 }
+                // 공유 링크 복원: 보낸 사람이 골랐던 경로 후보를 다시 선택
+                val altCount = result?.alternatives?.size ?: 0
+                if (altCount > 1) selectedAlt = pendingAlt.coerceIn(0, altCount - 1)
+                pendingAlt = 0
             } catch (e: Throwable) {
                 error = "오류: ${e.message}"
             } finally {
@@ -175,6 +206,27 @@ fun RouteOptimizerScreen() {
                 status = null
             }
         }
+    }
+
+    // 공유 링크(#r=…)로 열린 경우: 지점·설정 복원 후 자동 재계산 (앱 시작 시 1회)
+    LaunchedEffect(Unit) {
+        val h = locationHash()
+        if (!h.startsWith("#r=")) return@LaunchedEffect
+        runCatching {
+            val d = shareJson.decodeFromString(
+                SharePayload.serializer(), decodeURIComponent(h.removePrefix("#r=")))
+            if (d.places.size < 2) return@LaunchedEffect
+            rows.clear()
+            d.places.forEach { sp ->
+                rows.add(AddressRow().apply {
+                    picked = Suggestion(sp.label, sp.sub, LatLng(sp.lat, sp.lon))
+                    query = sp.label
+                })
+            }
+            roundTrip = d.roundTrip
+            pendingAlt = d.alt
+            runOptimize()
+        }.onFailure { error = "공유 링크를 읽지 못했습니다. (링크가 잘렸는지 확인하세요)" }
     }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -277,7 +329,8 @@ fun RouteOptimizerScreen() {
 
                 result?.let { r ->
                     Spacer(Modifier.height(20.dp))
-                    ResultCard(r, selectedAlt) { selectedAlt = it }
+                    ResultCard(r, selectedAlt, onSelect = { selectedAlt = it },
+                        onShare = { shareCurrent() })
                 }
 
                 // 고급 설정: 상용 시 공개 데모 서버 대신 자체 인프라를 가리키게 함
@@ -412,7 +465,12 @@ private fun AddressRowItem(
 }
 
 @Composable
-private fun ResultCard(routeSet: OptimizedRoute, selectedIndex: Int, onSelect: (Int) -> Unit) {
+private fun ResultCard(
+    routeSet: OptimizedRoute,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    onShare: () -> Unit,
+) {
     // 후보 목록: alternatives 가 있으면 그것을, 없으면 단일 경로.
     val alts = routeSet.alternatives.ifEmpty { listOf(routeSet) }
     val sel = alts[selectedIndex.coerceIn(0, alts.lastIndex)]
@@ -503,6 +561,14 @@ private fun ResultCard(routeSet: OptimizedRoute, selectedIndex: Int, onSelect: (
                     modifier = Modifier.fillMaxWidth()) {
                     Text(if (alts.size > 1) "지도에서 경로 비교" else "지도에서 경로 보기")
                 }
+            }
+
+            // 경로 공유: 지점+설정을 URL 해시에 담아 전달 (받는 쪽에서 자동 재계산)
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = onShare, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Share, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("경로 공유 (링크)")
             }
 
             // 전체 경로 한 번에 열기 — 네이버만 경유지 지원(모바일 최대 5, 데스크톱 웹)
@@ -641,6 +707,22 @@ private fun Metric(label: String, value: String) {
         Text(value, fontSize = 20.sp, fontWeight = FontWeight.Bold)
     }
 }
+
+// ---- 공유 링크 페이로드 ----
+/**
+ * URL 해시(#r=…)에 담는 공유 데이터. 폴리라인은 URL 에 담기엔 너무 커서 제외하고
+ * 지점·설정만 보내 수신 측에서 자동 재계산한다.
+ */
+@Serializable
+private data class SharePayload(
+    val v: Int = 1,
+    val roundTrip: Boolean = false,
+    val alt: Int = 0,
+    val places: List<SavedPlace> = emptyList(),
+)
+
+/** encodeDefaults=false 로 기본값·null 을 생략해 URL 을 최대한 짧게 유지. */
+private val shareJson = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
 // ---- 지도 페이로드 ----
 @Serializable
