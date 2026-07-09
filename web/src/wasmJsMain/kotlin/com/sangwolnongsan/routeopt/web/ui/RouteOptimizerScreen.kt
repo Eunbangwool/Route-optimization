@@ -58,6 +58,7 @@ import com.sangwolnongsan.routeopt.web.tmap.lsSet
 import com.sangwolnongsan.routeopt.web.tmap.encodeURIComponent
 import com.sangwolnongsan.routeopt.web.tmap.roShowMap
 import com.sangwolnongsan.routeopt.web.util.openUrl
+import com.sangwolnongsan.routeopt.web.vworld.VWorldSearch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -176,8 +177,8 @@ fun RouteOptimizerScreen() {
                     )
                 } else {
                     Text(
-                        "Nominatim(지오코딩) + OSRM(최적화) 공개 서버 사용 — 키 불필요. " +
-                            "공개 데모 서버라 다소 느리고 rate limit·비상업 용도이며, 한국 주소 정확도는 티맵보다 낮을 수 있습니다.",
+                        "주소 검색은 VWorld(국토부, 도로명·지번 정확)로 하고, 경로 최적화만 OSRM 공개 서버(무료)로 처리합니다. " +
+                            "OSRM은 데모 서버라 다소 느릴 수 있습니다. (티맵 선택 시 최적화가 티맵 실도로로 바뀝니다)",
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     )
                 }
@@ -194,7 +195,6 @@ fun RouteOptimizerScreen() {
                     AddressRowItem(
                         row = row,
                         badge = badge,
-                        client = client,
                         canDelete = rows.size > 2,
                         onDelete = { if (rows.size > 2) rows.removeAt(i) },
                     )
@@ -248,18 +248,17 @@ fun RouteOptimizerScreen() {
 private fun AddressRowItem(
     row: AddressRow,
     badge: String,
-    client: RouteProvider,
     canDelete: Boolean,
     onDelete: () -> Unit,
 ) {
-    // 디바운스 검색: query 변경 시 350ms 후 검색 (picked 상태면 검색 안 함)
-    LaunchedEffect(row.query, client) {
+    // 디바운스 검색: query 변경 시 VWorld 주소검색 (picked 상태면 검색 안 함)
+    LaunchedEffect(row.query) {
         if (row.picked != null) return@LaunchedEffect
         val q = row.query.trim()
         if (q.length < 2) { row.suggestions = emptyList(); return@LaunchedEffect }
-        delay(500)
+        delay(400)
         row.searching = true
-        row.suggestions = runCatching { client.search(q) }.getOrDefault(emptyList())
+        row.suggestions = runCatching { VWorldSearch.search(q) }.getOrDefault(emptyList())
         row.searching = false
     }
 
