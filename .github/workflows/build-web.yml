@@ -88,6 +88,9 @@ jobs:
           set -e
           DIST=web/build/dist/wasmJs/productionExecutable
           touch "$DIST/.nojekyll"           # _ 로 시작하는 자원 서빙 (Jekyll 우회)
+          # 캐시 무효화: 앱 번들 파일명이 매 배포 동일 → index.html 의 참조에 커밋 해시 쿼리 부여
+          SHA=${GITHUB_SHA::7}
+          sed -i "s#routeopt-web\.js#routeopt-web.js?v=${SHA}#g" "$DIST/index.html"
           cd "$DIST"
           git init -q
           git checkout -q -b gh-pages
