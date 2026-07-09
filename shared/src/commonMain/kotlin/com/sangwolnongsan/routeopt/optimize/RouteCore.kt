@@ -152,6 +152,8 @@ object RouteCore {
                         if (d < bd) { bd = d; pick = t }
                     }
                 }
+                // 방어: 남은 후보 비용이 전부 비유한(MAX_VALUE/Inf/NaN)이면 첫 미사용 노드 선택
+                if (pick < 0) for (t in 0 until m) if (!used[t]) { pick = t; break }
                 used[pick] = true
                 p[pos] = free[pick]
                 cur = free[pick]

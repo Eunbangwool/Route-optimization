@@ -53,9 +53,6 @@ import com.sangwolnongsan.routeopt.optimize.StraightLineOptimizer
 import com.sangwolnongsan.routeopt.web.osrm.OsrmClient
 import com.sangwolnongsan.routeopt.web.route.RouteProvider
 import com.sangwolnongsan.routeopt.web.route.Suggestion
-import com.sangwolnongsan.routeopt.web.tmap.TmapClient
-import com.sangwolnongsan.routeopt.web.tmap.lsGet
-import com.sangwolnongsan.routeopt.web.tmap.lsSet
 import com.sangwolnongsan.routeopt.web.tmap.encodeURIComponent
 import com.sangwolnongsan.routeopt.web.tmap.roShowMap
 import com.sangwolnongsan.routeopt.web.util.isMobileDevice
@@ -66,10 +63,6 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlin.math.roundToInt
-
-private const val KEY_STORE = "tmap_appkey"
-
-private enum class Provider { TMAP, OSM }
 
 /** 검색어·선택결과를 담는 주소 행. 각 필드는 상태라 변경 시 재구성된다. */
 private class AddressRow {
@@ -84,8 +77,6 @@ private class AddressRow {
 fun RouteOptimizerScreen() {
     val scope = rememberCoroutineScope()
 
-    var provider by remember { mutableStateOf(Provider.OSM) }
-    var appKey by remember { mutableStateOf(lsGet(KEY_STORE)) }
     val rows = remember { mutableStateListOf(AddressRow(), AddressRow()) }
     var roundTrip by remember { mutableStateOf(false) }
 
@@ -94,18 +85,12 @@ fun RouteOptimizerScreen() {
     var error by remember { mutableStateOf<String?>(null) }
     var result by remember { mutableStateOf<OptimizedRoute?>(null) }
 
-    // 엔진/키 바뀌면 검색 클라이언트 재생성
-    val client: RouteProvider = remember(provider, appKey) {
-        if (provider == Provider.OSM) OsrmClient() else TmapClient(appKey.trim())
-    }
+    // 최적화 엔진: OSRM(무료). 검색은 VWorld(엔진 무관).
+    val client: RouteProvider = remember { OsrmClient() }
 
     fun runOptimize() {
         error = null
         result = null
-        val osm = provider == Provider.OSM
-        if (!osm && appKey.trim().isEmpty()) {
-            error = "티맵 앱키를 입력하거나 OSM 무료 모드를 선택하세요."; return
-        }
         // 검색 후 선택(picked)된 지점만 사용
         val places = rows.mapIndexedNotNull { i, row ->
             row.picked?.let { Place(id = "p$i", address = it.label, coord = it.coord, resolvedName = it.sub) }
@@ -127,7 +112,7 @@ fun RouteOptimizerScreen() {
                     try {
                         client.optimize(start, vias, end, roundTrip)
                     } catch (e: Throwable) {
-                        error = "${if (osm) "OSRM" else "티맵"} 최적화 실패 → 직선거리 기준으로 대체했습니다. (${e.message})"
+                        error = "실도로 최적화 실패 → 직선거리 기준으로 대체했습니다. (${e.message})"
                         StraightLineOptimizer.optimize(start, vias, end)
                     }
                 }
@@ -148,43 +133,8 @@ fun RouteOptimizerScreen() {
             ) {
                 Text("최단 경로 설계", fontSize = 26.sp, fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary)
-                Text("여러 주소의 방문 순서를 실도로 기준으로 최적화합니다.",
+                Text("여러 주소의 방문 순서를 실도로 기준으로 최적화합니다. (키 불필요)",
                     fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                Spacer(Modifier.height(16.dp))
-
-                // 엔진 선택
-                Text("경로 엔진", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Spacer(Modifier.height(6.dp))
-                Row(Modifier.fillMaxWidth()) {
-                    FilterChip(
-                        selected = provider == Provider.TMAP,
-                        onClick = { provider = Provider.TMAP },
-                        label = { Text("티맵 (키 필요·정확)") },
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    FilterChip(
-                        selected = provider == Provider.OSM,
-                        onClick = { provider = Provider.OSM },
-                        label = { Text("OSM 무료 (키 불필요)") },
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-
-                if (provider == Provider.TMAP) {
-                    OutlinedTextField(
-                        value = appKey,
-                        onValueChange = { appKey = it; lsSet(KEY_STORE, it.trim()) },
-                        label = { Text("티맵 앱키 (SK open API AppKey)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                } else {
-                    Text(
-                        "주소 검색은 VWorld(국토부, 도로명·지번 정확)로 하고, 경로 최적화만 OSRM 공개 서버(무료)로 처리합니다. " +
-                            "OSRM은 데모 서버라 다소 느릴 수 있습니다. (티맵 선택 시 최적화가 티맵 실도로로 바뀝니다)",
-                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    )
-                }
                 Spacer(Modifier.height(16.dp))
 
                 Text("방문 주소 (검색 후 선택)", fontWeight = FontWeight.SemiBold)

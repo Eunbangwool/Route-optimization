@@ -12,6 +12,7 @@ import com.sangwolnongsan.routeopt.web.route.RouteProvider
 import com.sangwolnongsan.routeopt.web.route.Suggestion
 import com.sangwolnongsan.routeopt.web.util.httpGetText
 import kotlin.js.JsString
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.await
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
@@ -79,6 +80,8 @@ class OsrmClient : RouteProvider {
         // 1차: 시간행렬 + RouteCore (전역최적/ILS). 실패 시 기존 /trip 휴리스틱.
         return try {
             tableOptimize(start, vias, end, roundTrip)
+        } catch (e: CancellationException) {
+            throw e // 코루틴 취소는 fallback 하지 말고 그대로 전파
         } catch (e: Throwable) {
             tripOptimize(start, vias, end, roundTrip)
         }
