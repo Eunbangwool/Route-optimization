@@ -137,6 +137,19 @@ fun RouteOptimizerScreen() {
         saved = next
     }
 
+    fun resetAll() {
+        val hasInput = rows.any { it.picked != null || it.query.isNotBlank() } || result != null
+        if (hasInput && !jsConfirm("입력한 주소와 계산 결과를 모두 지울까요?")) return
+        rows.clear()
+        rows.add(AddressRow()); rows.add(AddressRow())
+        roundTrip = false
+        result = null
+        selectedAlt = 0
+        pendingAlt = 0
+        error = null
+        status = null
+    }
+
     fun shareCurrent() {
         error = null
         val places = pickedPlaces()
@@ -321,8 +334,14 @@ fun RouteOptimizerScreen() {
                 }
 
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = { saveCurrent() }, modifier = Modifier.fillMaxWidth()) {
-                    Text("현재 경로 저장")
+                Row(Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { saveCurrent() }, modifier = Modifier.weight(1f)) {
+                        Text("현재 경로 저장")
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = { resetAll() }, modifier = Modifier.weight(1f)) {
+                        Text("경로 초기화")
+                    }
                 }
 
                 if (saved.isNotEmpty()) {
