@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -336,6 +337,9 @@ private fun ResultCard(r: OptimizedRoute) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
         Column(Modifier.padding(16.dp)) {
+            val mobile = remember { isMobileDevice() }
+            var navApp by remember { mutableStateOf(NavApp.NAVER) }
+
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Metric("총 거리", formatKm(r.totalDistanceMeters))
                 Metric("예상 시간", formatDuration(r.totalTimeSeconds))
@@ -350,12 +354,24 @@ private fun ResultCard(r: OptimizedRoute) {
                 fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
             )
             Spacer(Modifier.height(12.dp))
+
+            // 각 지점 '안내' 버튼에 사용할 내비 앱 선택 (구간별 릴레이)
+            Text("내비 앱 (각 지점 ‘안내’)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth()) {
+                FilterChip(navApp == NavApp.NAVER, { navApp = NavApp.NAVER }, { Text("네이버") })
+                Spacer(Modifier.width(6.dp))
+                FilterChip(navApp == NavApp.TMAP, { navApp = NavApp.TMAP }, { Text("티맵") })
+                Spacer(Modifier.width(6.dp))
+                FilterChip(navApp == NavApp.KAKAO, { navApp = NavApp.KAKAO }, { Text("카카오") })
+            }
+            Spacer(Modifier.height(12.dp))
             HorizontalDivider()
             Spacer(Modifier.height(12.dp))
 
             r.orderedPlaces.forEachIndexed { i, p ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.Top) {
+                    verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.width(28.dp)) {
                         Text("${i + 1}", fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary)
@@ -366,6 +382,12 @@ private fun ResultCard(r: OptimizedRoute) {
                             Text(it, fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                         }
+                    }
+                    navToUrl(p, navApp, mobile)?.let { url ->
+                        OutlinedButton(
+                            onClick = { openUrl(url) },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        ) { Text("안내", fontSize = 13.sp) }
                     }
                 }
                 if (i < r.legs.size) {
@@ -386,45 +408,25 @@ private fun ResultCard(r: OptimizedRoute) {
                 }
             }
 
-            // 외부 공유: 최적 순서를 국내 지도로 넘기기 (모바일=앱 스킴, 데스크톱=웹 지도)
+            // 전체 경로 한 번에 열기 — 네이버만 경유지 지원(모바일 최대 5, 데스크톱 웹)
             val withCoords = r.orderedPlaces.filter { it.coord != null }
             if (withCoords.size >= 2) {
-                val mobile = remember { isMobileDevice() }
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(12.dp))
-                Text(if (mobile) "지도앱으로 안내 시작" else "지도(웹)에서 경로 열기",
-                    fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text("전체 경로 한 번에 열기 (네이버)", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 Spacer(Modifier.height(8.dp))
-
                 naverUrl(r, mobile)?.let { url ->
                     Button(onClick = { openUrl(url) }, modifier = Modifier.fillMaxWidth()) {
                         Text(if (mobile) "네이버 지도로 열기 (경유지 포함)" else "네이버 지도 웹으로 열기")
-                    }
-                    Spacer(Modifier.height(8.dp))
-                }
-                Row(Modifier.fillMaxWidth()) {
-                    tmapUrl(r, mobile)?.let { url ->
-                        OutlinedButton(onClick = { openUrl(url) }, modifier = Modifier.weight(1f)) {
-                            Text("티맵 (도착지)")
-                        }
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    kakaoUrl(r, mobile)?.let { url ->
-                        OutlinedButton(onClick = { openUrl(url) }, modifier = Modifier.weight(1f)) {
-                            Text(if (mobile) "카카오맵 (출발·도착)" else "카카오맵 웹 (출발·도착)")
-                        }
                     }
                 }
                 val midCount = withCoords.size - 2
                 Text(
                     buildString {
-                        if (mobile) {
-                            append("해당 앱 설치 시 동작합니다.")
-                            if (midCount > 5) append(" 네이버는 경유지 5개까지 전달됩니다(현재 $midCount 개).")
-                        } else {
-                            append("PC에서는 웹 지도로 열립니다. 경유지 포함 전체 경로 안내는 모바일 앱에서 지원됩니다. (티맵은 모바일 전용)")
-                        }
+                        append("여러 곳을 한 번에 넣는 건 네이버만 지원하며 경유지 최대 5개입니다")
+                        if (midCount > 5) append(" (현재 $midCount 개 — 초과분은 잘림)")
+                        append(". 경유지가 많으면 위의 지점별 ‘안내’로 한 곳씩 이동하세요.")
                     },
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
@@ -435,7 +437,29 @@ private fun ResultCard(r: OptimizedRoute) {
     }
 }
 
+private enum class NavApp { NAVER, TMAP, KAKAO }
+
 private fun enc(s: String): String = encodeURIComponent(s)
+
+/**
+ * 구간별 릴레이: 현재위치 → 특정 지점 단일 목적지 안내.
+ * 모바일=앱 스킴, 데스크톱=웹 지도(위치 표시). 경유지 개수 제약 없음.
+ */
+private fun navToUrl(p: Place, app: NavApp, mobile: Boolean): String? {
+    val c = p.coord ?: return null
+    val name = enc(p.address)
+    return when (app) {
+        NavApp.NAVER ->
+            if (mobile) "nmap://navigation?dlat=${c.lat}&dlng=${c.lon}&dname=$name&appname=com.sangwolnongsan.routeopt"
+            else "https://map.naver.com/p/search/$name"
+        NavApp.TMAP ->
+            if (mobile) "tmap://route?goalname=$name&goalx=${c.lon}&goaly=${c.lat}"
+            else "https://map.kakao.com/link/to/$name,${c.lat},${c.lon}" // 티맵 웹 지도 없음 → 위치만 표시
+        NavApp.KAKAO ->
+            if (mobile) "kakaomap://route?ep=${c.lat},${c.lon}&by=CAR"
+            else "https://map.kakao.com/link/to/$name,${c.lat},${c.lon}"
+    }
+}
 
 /**
  * 네이버 지도. 모바일=앱 스킴(출발+경유지 최대5+도착), 데스크톱=웹 길찾기(출발→도착).
@@ -463,27 +487,6 @@ private fun naverUrl(r: OptimizedRoute, mobile: Boolean): String? {
     return "https://map.naver.com/p/directions/" +
         "${s.lon},${s.lat},${enc(sName)},,/" +
         "${d.lon},${d.lat},${enc(dName)},,/-/car"
-}
-
-/** 티맵: 모바일 앱 스킴(도착지). 데스크톱 웹 지도 없음 → null(숨김). */
-private fun tmapUrl(r: OptimizedRoute, mobile: Boolean): String? {
-    if (!mobile) return null
-    val d = r.orderedPlaces.lastOrNull { it.coord != null } ?: return null
-    val c = d.coord!!
-    return "tmap://route?goalname=${enc(d.address)}&goalx=${c.lon}&goaly=${c.lat}"
-}
-
-/** 카카오맵. 모바일=앱 스킴, 데스크톱=웹 길찾기(link/from/to). 둘 다 출발→도착. */
-private fun kakaoUrl(r: OptimizedRoute, mobile: Boolean): String? {
-    val pts = r.orderedPlaces.filter { it.coord != null }
-    if (pts.size < 2) return null
-    val s = pts.first().coord!!
-    val d = pts.last().coord!!
-    if (mobile) {
-        return "kakaomap://route?sp=${s.lat},${s.lon}&ep=${d.lat},${d.lon}&by=CAR"
-    }
-    return "https://map.kakao.com/link/from/${enc(pts.first().address)},${s.lat},${s.lon}" +
-        "/to/${enc(pts.last().address)},${d.lat},${d.lon}"
 }
 
 @Composable
