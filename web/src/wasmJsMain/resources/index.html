@@ -27,7 +27,7 @@
         @keyframes spin { to { transform: rotate(360deg); } }
         /* 지도 오버레이 */
         #ro-map {
-            position: fixed; inset: 0; z-index: 50; display: none; background: #0B1220;
+            position: fixed; inset: 0; z-index: 2147483000; display: none; background: #0B1220;
         }
         #ro-map-canvas { position: absolute; inset: 0; }
         #ro-map-close {
@@ -116,6 +116,9 @@
 
         document.getElementById('ro-map-close').addEventListener('click', function () {
             document.getElementById('ro-map').style.display = 'none';
+            // Compose 캔버스 복원
+            var ct = document.getElementById('compose-target');
+            if (ct) { ct.style.visibility = ''; }
         });
 
         var _roMap = null;       // 티맵 지도 인스턴스
@@ -140,6 +143,9 @@
             var errBox = document.getElementById('ro-map-err');
             errBox.style.display = 'none';
             document.getElementById('ro-map').style.display = 'block';
+            // 지도 여는 동안 Compose 캔버스 숨김 → 전체화면 캔버스 재그리기와의 겹침(닫기버튼 깜빡임) 방지
+            var ct = document.getElementById('compose-target');
+            if (ct) { ct.style.visibility = 'hidden'; }
             if (data.engine === 'osm') roShowOsm(data, errBox);
             else roShowTmap(data, errBox);
         };
