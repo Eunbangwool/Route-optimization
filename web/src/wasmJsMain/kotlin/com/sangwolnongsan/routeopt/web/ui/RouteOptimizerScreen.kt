@@ -32,6 +32,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,16 +47,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.sangwolnongsan.routeopt.model.LatLng
 import com.sangwolnongsan.routeopt.model.OptimizedRoute
 import com.sangwolnongsan.routeopt.model.Place
 import com.sangwolnongsan.routeopt.model.RouteSource
 import com.sangwolnongsan.routeopt.optimize.StraightLineOptimizer
+import com.sangwolnongsan.routeopt.web.data.SavedPlace
+import com.sangwolnongsan.routeopt.web.data.SavedRoute
+import com.sangwolnongsan.routeopt.web.data.SavedRoutes
 import com.sangwolnongsan.routeopt.web.osrm.OsrmClient
 import com.sangwolnongsan.routeopt.web.route.RouteProvider
 import com.sangwolnongsan.routeopt.web.route.Suggestion
 import com.sangwolnongsan.routeopt.web.tmap.encodeURIComponent
 import com.sangwolnongsan.routeopt.web.tmap.roShowMap
 import com.sangwolnongsan.routeopt.web.util.isMobileDevice
+import com.sangwolnongsan.routeopt.web.util.jsConfirm
+import com.sangwolnongsan.routeopt.web.util.jsPrompt
 import com.sangwolnongsan.routeopt.web.util.openUrl
 import com.sangwolnongsan.routeopt.web.vworld.VWorldSearch
 import kotlinx.coroutines.delay
@@ -84,9 +91,47 @@ fun RouteOptimizerScreen() {
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var result by remember { mutableStateOf<OptimizedRoute?>(null) }
+    var saved by remember { mutableStateOf(SavedRoutes.load()) }
 
     // 최적화 엔진: OSRM(무료). 검색은 VWorld(엔진 무관).
     val client: RouteProvider = remember { OsrmClient() }
+
+    fun pickedPlaces(): List<SavedPlace> = rows.mapNotNull { row ->
+        row.picked?.let { SavedPlace(it.label, it.sub, it.coord.lat, it.coord.lon) }
+    }
+
+    fun saveCurrent() {
+        error = null
+        val places = pickedPlaces()
+        if (places.size < 2) { error = "저장하려면 지점을 2개 이상 선택하세요."; return }
+        val name = jsPrompt("저장할 경로 이름", "경로 ${saved.size + 1}").trim()
+        if (name.isEmpty()) return
+        // 같은 이름은 덮어쓰기
+        val next = listOf(SavedRoute(name, roundTrip, places)) + saved.filterNot { it.name == name }
+        SavedRoutes.persist(next)
+        saved = next
+    }
+
+    fun loadRoute(sr: SavedRoute) {
+        error = null
+        result = null
+        rows.clear()
+        sr.places.forEach { sp ->
+            rows.add(AddressRow().apply {
+                picked = Suggestion(sp.label, sp.sub, LatLng(sp.lat, sp.lon))
+                query = sp.label
+            })
+        }
+        if (rows.size < 2) { rows.add(AddressRow()); rows.add(AddressRow()) }
+        roundTrip = sr.roundTrip
+    }
+
+    fun deleteRoute(sr: SavedRoute) {
+        if (!jsConfirm("‘${sr.name}’ 경로를 삭제할까요?")) return
+        val next = saved.filterNot { it === sr || it.name == sr.name }
+        SavedRoutes.persist(next)
+        saved = next
+    }
 
     fun runOptimize() {
         error = null
@@ -176,6 +221,41 @@ fun RouteOptimizerScreen() {
                             strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
                     } else {
                         Text("최적 경로 계산", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = { saveCurrent() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("현재 경로 저장")
+                }
+
+                if (saved.isNotEmpty()) {
+                    Spacer(Modifier.height(16.dp))
+                    Text("저장된 경로", fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    saved.forEach { sr ->
+                        Card(
+                            Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(start = 12.dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(sr.name, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                    Text(
+                                        "${sr.places.size}개 지점" + if (sr.roundTrip) " · 왕복" else "",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                                    )
+                                }
+                                TextButton(onClick = { loadRoute(sr) }) { Text("불러오기") }
+                                IconButton(onClick = { deleteRoute(sr) }) {
+                                    Icon(Icons.Default.Close, contentDescription = "삭제")
+                                }
+                            }
+                        }
                     }
                 }
 

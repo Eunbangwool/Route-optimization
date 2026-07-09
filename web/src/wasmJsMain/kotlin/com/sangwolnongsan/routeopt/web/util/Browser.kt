@@ -6,6 +6,14 @@ package com.sangwolnongsan.routeopt.web.util
 @JsFun("() => { if (window.roAppReady) window.roAppReady(); }")
 external fun roAppReady()
 
+/** 브라우저 prompt 대화상자. 취소 시 빈 문자열. (경로 이름 입력용) */
+@JsFun("(msg, def) => { var r = window.prompt(msg, def); return r == null ? '' : r; }")
+external fun jsPrompt(message: String, def: String): String
+
+/** 확인 대화상자 (삭제 확인용). */
+@JsFun("(msg) => window.confirm(msg)")
+external fun jsConfirm(message: String): Boolean
+
 /** 모바일 기기 여부 (앱 스킴 vs 웹 지도 URL 분기용). */
 @JsFun("() => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)")
 external fun isMobileDevice(): Boolean
