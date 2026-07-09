@@ -223,7 +223,8 @@
             var VWORLD_KEY = "3EBC07F7-1D05-3457-92DF-A4A9AE7DB876";
             var _vwSeq = 0;
             // VWorld 는 브라우저 fetch 가 CORS 에 막히므로 JSONP(script 태그)로 호출한다.
-            function reqCat(q, cat) {
+            // typ: 'place'(장소·상호) | 'address'(주소). cat: address 는 ROAD/PARCEL, place 는 '' (전체).
+            function req(q, typ, cat) {
                 return new Promise(function (resolve) {
                     var cb = '__vw_' + (_vwSeq++) + '_' + Math.floor(performance.now());
                     var s = document.createElement('script');
@@ -243,10 +244,16 @@
                             return;
                         }
                         var items = (d.response.result && d.response.result.items) || [];
-                        var out = items.filter(function (it) { return it.point && it.address; }).map(function (it) {
+                        var out = items.filter(function (it) { return it.point; }).map(function (it) {
+                            var road = it.address ? it.address.road : '';
+                            var parcel = it.address ? it.address.parcel : '';
+                            var title = it.title || '';
+                            // place: 상호/장소명 = title, 주소를 부제목. address: 도로명/지번이 곧 라벨.
+                            var label = title || road || parcel || '';
+                            var sub = title ? (road || parcel || '') : (road && parcel ? parcel : '');
                             return {
-                                label: it.address.road || it.address.parcel || '',
-                                sub: (it.address.zipcode || '') + (it.address.parcel && it.address.road ? ' · ' + it.address.parcel : ''),
+                                label: label,
+                                sub: sub,
                                 lat: parseFloat(it.point.y),
                                 lon: parseFloat(it.point.x),
                             };
@@ -255,25 +262,31 @@
                     };
                     s.onerror = function () { cleanup(); resolve({ items: [], err: 'network' }); };
                     s.src = 'https://api.vworld.kr/req/search?service=search&request=search' +
-                        '&version=2.0&size=10&page=1&type=address&category=' + cat +
+                        '&version=2.0&size=10&page=1&type=' + typ +
+                        (cat ? '&category=' + cat : '') +
                         '&format=json&errorformat=json&key=' + VWORLD_KEY +
                         '&query=' + encodeURIComponent(q) + '&callback=' + cb;
                     document.head.appendChild(s);
                 });
             }
-            // 도로명 우선 + 지번 병합, 중복 라벨 제거. { items, error } 반환.
+            // 장소(상호) + 도로명 + 지번 병합, 중복 라벨 제거. { items, error } 반환.
             window.roSearchAddress = function (query) {
                 var q = (query || '').trim();
                 if (!q) return Promise.resolve(JSON.stringify({ items: [], error: null }));
-                return Promise.all([reqCat(q, 'ROAD'), reqCat(q, 'PARCEL')]).then(function (res) {
+                return Promise.all([
+                    req(q, 'place', ''),
+                    req(q, 'address', 'ROAD'),
+                    req(q, 'address', 'PARCEL'),
+                ]).then(function (res) {
                     var seen = {}, out = [];
                     res.forEach(function (r) {
                         (r.items || []).forEach(function (c) {
-                            if (!seen[c.label]) { seen[c.label] = 1; out.push(c); }
+                            var key = c.label + '|' + c.lat.toFixed(5) + '|' + c.lon.toFixed(5);
+                            if (!seen[key]) { seen[key] = 1; out.push(c); }
                         });
                     });
-                    var err = out.length ? null : (res[0].err || res[1].err || null);
-                    return JSON.stringify({ items: out.slice(0, 8), error: err });
+                    var err = out.length ? null : (res[0].err || res[1].err || res[2].err || null);
+                    return JSON.stringify({ items: out.slice(0, 10), error: err });
                 }).catch(function (e) {
                     return JSON.stringify({ items: [], error: String(e) });
                 });
