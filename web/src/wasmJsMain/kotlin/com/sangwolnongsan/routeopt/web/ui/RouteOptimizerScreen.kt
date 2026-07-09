@@ -57,6 +57,7 @@ import com.sangwolnongsan.routeopt.web.tmap.lsGet
 import com.sangwolnongsan.routeopt.web.tmap.lsSet
 import com.sangwolnongsan.routeopt.web.tmap.encodeURIComponent
 import com.sangwolnongsan.routeopt.web.tmap.roShowMap
+import com.sangwolnongsan.routeopt.web.util.isMobileDevice
 import com.sangwolnongsan.routeopt.web.util.openUrl
 import com.sangwolnongsan.routeopt.web.vworld.VWorldSearch
 import kotlinx.coroutines.delay
@@ -385,39 +386,45 @@ private fun ResultCard(r: OptimizedRoute) {
                 }
             }
 
-            // 외부 공유: 최적 순서를 국내 지도앱으로 넘기기 (API 키 불필요, 모바일 앱 스킴)
+            // 외부 공유: 최적 순서를 국내 지도로 넘기기 (모바일=앱 스킴, 데스크톱=웹 지도)
             val withCoords = r.orderedPlaces.filter { it.coord != null }
             if (withCoords.size >= 2) {
+                val mobile = remember { isMobileDevice() }
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(12.dp))
-                Text("지도앱으로 안내 시작", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(if (mobile) "지도앱으로 안내 시작" else "지도(웹)에서 경로 열기",
+                    fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 Spacer(Modifier.height(8.dp))
 
-                naverUrl(r)?.let { url ->
+                naverUrl(r, mobile)?.let { url ->
                     Button(onClick = { openUrl(url) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("네이버 지도로 열기 (경유지 포함)")
+                        Text(if (mobile) "네이버 지도로 열기 (경유지 포함)" else "네이버 지도 웹으로 열기")
                     }
                     Spacer(Modifier.height(8.dp))
                 }
                 Row(Modifier.fillMaxWidth()) {
-                    tmapUrl(r)?.let { url ->
+                    tmapUrl(r, mobile)?.let { url ->
                         OutlinedButton(onClick = { openUrl(url) }, modifier = Modifier.weight(1f)) {
                             Text("티맵 (도착지)")
                         }
                         Spacer(Modifier.width(8.dp))
                     }
-                    kakaoUrl(r)?.let { url ->
+                    kakaoUrl(r, mobile)?.let { url ->
                         OutlinedButton(onClick = { openUrl(url) }, modifier = Modifier.weight(1f)) {
-                            Text("카카오맵 (출발·도착)")
+                            Text(if (mobile) "카카오맵 (출발·도착)" else "카카오맵 웹 (출발·도착)")
                         }
                     }
                 }
                 val midCount = withCoords.size - 2
                 Text(
                     buildString {
-                        append("모바일에서 해당 앱 설치 시 동작합니다 (API 키 불필요).")
-                        if (midCount > 5) append(" 네이버는 경유지 5개까지만 전달됩니다(현재 $midCount 개).")
+                        if (mobile) {
+                            append("해당 앱 설치 시 동작합니다.")
+                            if (midCount > 5) append(" 네이버는 경유지 5개까지 전달됩니다(현재 $midCount 개).")
+                        } else {
+                            append("PC에서는 웹 지도로 열립니다. 경유지 포함 전체 경로 안내는 모바일 앱에서 지원됩니다. (티맵은 모바일 전용)")
+                        }
                     },
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
@@ -430,38 +437,53 @@ private fun ResultCard(r: OptimizedRoute) {
 
 private fun enc(s: String): String = encodeURIComponent(s)
 
-/** 네이버 지도 앱 스킴: 출발 + 경유지(최대 5) + 도착. 좌표 2개 미만이면 null. */
-private fun naverUrl(r: OptimizedRoute): String? {
+/**
+ * 네이버 지도. 모바일=앱 스킴(출발+경유지 최대5+도착), 데스크톱=웹 길찾기(출발→도착).
+ */
+private fun naverUrl(r: OptimizedRoute, mobile: Boolean): String? {
     val pts = r.orderedPlaces.filter { it.coord != null }
     if (pts.size < 2) return null
     val s = pts.first().coord!!
     val d = pts.last().coord!!
-    val sb = StringBuilder("nmap://route/car?")
-    sb.append("slat=${s.lat}&slng=${s.lon}&sname=${enc(pts.first().address)}")
-    pts.subList(1, pts.size - 1).take(5).forEachIndexed { i, p ->
-        val n = i + 1
-        val c = p.coord!!
-        sb.append("&v${n}lat=${c.lat}&v${n}lng=${c.lon}&v${n}name=${enc(p.address)}")
+    val sName = pts.first().address
+    val dName = pts.last().address
+    if (mobile) {
+        val sb = StringBuilder("nmap://route/car?")
+        sb.append("slat=${s.lat}&slng=${s.lon}&sname=${enc(sName)}")
+        pts.subList(1, pts.size - 1).take(5).forEachIndexed { i, p ->
+            val n = i + 1
+            val c = p.coord!!
+            sb.append("&v${n}lat=${c.lat}&v${n}lng=${c.lon}&v${n}name=${enc(p.address)}")
+        }
+        sb.append("&dlat=${d.lat}&dlng=${d.lon}&dname=${enc(dName)}")
+        sb.append("&appname=com.sangwolnongsan.routeopt")
+        return sb.toString()
     }
-    sb.append("&dlat=${d.lat}&dlng=${d.lon}&dname=${enc(pts.last().address)}")
-    sb.append("&appname=com.sangwolnongsan.routeopt")
-    return sb.toString()
+    // 데스크톱 웹 길찾기: 경도,위도,명칭 순
+    return "https://map.naver.com/p/directions/" +
+        "${s.lon},${s.lat},${enc(sName)},,/" +
+        "${d.lon},${d.lat},${enc(dName)},,/-/car"
 }
 
-/** 티맵 앱 스킴: 최종 목적지 안내. */
-private fun tmapUrl(r: OptimizedRoute): String? {
+/** 티맵: 모바일 앱 스킴(도착지). 데스크톱 웹 지도 없음 → null(숨김). */
+private fun tmapUrl(r: OptimizedRoute, mobile: Boolean): String? {
+    if (!mobile) return null
     val d = r.orderedPlaces.lastOrNull { it.coord != null } ?: return null
     val c = d.coord!!
     return "tmap://route?goalname=${enc(d.address)}&goalx=${c.lon}&goaly=${c.lat}"
 }
 
-/** 카카오맵 앱 스킴: 출발→도착(경유지 미지원). */
-private fun kakaoUrl(r: OptimizedRoute): String? {
+/** 카카오맵. 모바일=앱 스킴, 데스크톱=웹 길찾기(link/from/to). 둘 다 출발→도착. */
+private fun kakaoUrl(r: OptimizedRoute, mobile: Boolean): String? {
     val pts = r.orderedPlaces.filter { it.coord != null }
     if (pts.size < 2) return null
     val s = pts.first().coord!!
     val d = pts.last().coord!!
-    return "kakaomap://route?sp=${s.lat},${s.lon}&ep=${d.lat},${d.lon}&by=CAR"
+    if (mobile) {
+        return "kakaomap://route?sp=${s.lat},${s.lon}&ep=${d.lat},${d.lon}&by=CAR"
+    }
+    return "https://map.kakao.com/link/from/${enc(pts.first().address)},${s.lat},${s.lon}" +
+        "/to/${enc(pts.last().address)},${d.lat},${d.lon}"
 }
 
 @Composable

@@ -6,6 +6,10 @@ package com.sangwolnongsan.routeopt.web.util
 @JsFun("() => { if (window.roAppReady) window.roAppReady(); }")
 external fun roAppReady()
 
+/** 모바일 기기 여부 (앱 스킴 vs 웹 지도 URL 분기용). */
+@JsFun("() => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)")
+external fun isMobileDevice(): Boolean
+
 /** 새 탭으로 URL 열기 (외부 지도앱 핸드오프). */
 @JsFun("(url) => { window.open(url, '_blank', 'noopener'); }")
 external fun openUrl(url: String)
