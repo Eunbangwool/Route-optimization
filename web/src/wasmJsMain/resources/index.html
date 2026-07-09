@@ -161,8 +161,11 @@
                 // 단일 지점(후보 미리보기)이면 더 확대
                 var initZoom = markers.length === 1 ? 16 : 12;
                 _leaflet = L.map('ro-map-canvas').setView(center, initZoom);
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(_leaflet);
+                // 타일: 설정(localStorage tile_url)이 있으면 그것을, 없으면 OSM 공개타일(개발용).
+                var tileUrl = (localStorage.getItem('tile_url') || '').trim()
+                    || 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+                var tileAttr = (localStorage.getItem('tile_attr') || '').trim() || '© OpenStreetMap';
+                L.tileLayer(tileUrl, { maxZoom: 19, attribution: tileAttr }).addTo(_leaflet);
                 var pts = [];
                 markers.forEach(function (m, i) {
                     L.marker([m.lat, m.lon]).addTo(_leaflet).bindPopup((i + 1) + '. ' + m.label);

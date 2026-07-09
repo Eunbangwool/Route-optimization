@@ -10,6 +10,7 @@ import com.sangwolnongsan.routeopt.model.RouteSource
 import com.sangwolnongsan.routeopt.optimize.RouteCore
 import com.sangwolnongsan.routeopt.web.route.RouteProvider
 import com.sangwolnongsan.routeopt.web.route.Suggestion
+import com.sangwolnongsan.routeopt.web.tmap.lsGet
 import com.sangwolnongsan.routeopt.web.util.httpGetText
 import kotlin.js.JsString
 import kotlinx.coroutines.CancellationException
@@ -39,7 +40,13 @@ class OsrmClient : RouteProvider {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val nominatim = "https://nominatim.openstreetmap.org"
-    private val osrm = "https://router.project-osrm.org"
+
+    /**
+     * OSRM 서버 주소. 설정(localStorage "osrm_base")이 있으면 그것을, 없으면 공개 데모.
+     * ⚠️ 공개 데모(router.project-osrm.org)는 개발용만 — 상용은 자체 호스팅 주소를 설정할 것.
+     */
+    private fun osrmBase(): String =
+        lsGet("osrm_base").trim().trimEnd('/').ifBlank { "https://router.project-osrm.org" }
 
     /**
      * Nominatim(OSM) 자동완성 검색 — 키 불필요. accept-language=ko 로 한국어 결과,
@@ -104,7 +111,8 @@ class OsrmClient : RouteProvider {
         val coordStr = pts.joinToString(";") { "${it.coord!!.lon},${it.coord!!.lat}" }
 
         // ---- 1) 시간행렬 ----
-        val tUrl = "$osrm/table/v1/driving/$coordStr?annotations=duration"
+        val base = osrmBase()
+        val tUrl = "$base/table/v1/driving/$coordStr?annotations=duration"
         val tText = httpGetText(tUrl).await<JsString>().toString()
         val tRoot = json.parseToJsonElement(tText).jsonObject
         if (tRoot["code"]?.jsonPrimitive?.contentOrNull != "Ok") {
@@ -126,7 +134,7 @@ class OsrmClient : RouteProvider {
 
         // ---- 3) 확정 순서의 실도로 경로 ----
         val rCoord = ordered.joinToString(";") { "${it.coord!!.lon},${it.coord!!.lat}" }
-        val rUrl = "$osrm/route/v1/driving/$rCoord?overview=full&geometries=geojson&steps=false"
+        val rUrl = "$base/route/v1/driving/$rCoord?overview=full&geometries=geojson&steps=false"
         val rText = httpGetText(rUrl).await<JsString>().toString()
         val rRoot = json.parseToJsonElement(rText).jsonObject
         if (rRoot["code"]?.jsonPrimitive?.contentOrNull != "Ok") {
@@ -182,7 +190,7 @@ class OsrmClient : RouteProvider {
         } else {
             "source=first&destination=last&roundtrip=false"
         }
-        val url = "$osrm/trip/v1/driving/$coordStr?$opts&geometries=geojson&overview=full&annotations=false"
+        val url = "${osrmBase()}/trip/v1/driving/$coordStr?$opts&geometries=geojson&overview=full&annotations=false"
 
         val text = httpGetText(url).await<JsString>().toString()
         val root = json.parseToJsonElement(text).jsonObject

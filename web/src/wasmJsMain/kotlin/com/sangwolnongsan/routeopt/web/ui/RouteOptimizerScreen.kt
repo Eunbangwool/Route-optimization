@@ -60,6 +60,8 @@ import com.sangwolnongsan.routeopt.web.osrm.OsrmClient
 import com.sangwolnongsan.routeopt.web.route.RouteProvider
 import com.sangwolnongsan.routeopt.web.route.Suggestion
 import com.sangwolnongsan.routeopt.web.tmap.encodeURIComponent
+import com.sangwolnongsan.routeopt.web.tmap.lsGet
+import com.sangwolnongsan.routeopt.web.tmap.lsSet
 import com.sangwolnongsan.routeopt.web.tmap.roShowMap
 import com.sangwolnongsan.routeopt.web.util.isMobileDevice
 import com.sangwolnongsan.routeopt.web.util.jsConfirm
@@ -93,6 +95,9 @@ fun RouteOptimizerScreen() {
     var error by remember { mutableStateOf<String?>(null) }
     var result by remember { mutableStateOf<OptimizedRoute?>(null) }
     var saved by remember { mutableStateOf(SavedRoutes.load()) }
+    var showAdvanced by remember { mutableStateOf(false) }
+    var osrmBase by remember { mutableStateOf(lsGet("osrm_base")) }
+    var tileUrl by remember { mutableStateOf(lsGet("tile_url")) }
 
     // 최적화 엔진: OSRM(무료). 검색은 VWorld(엔진 무관).
     val client: RouteProvider = remember { OsrmClient() }
@@ -272,6 +277,43 @@ fun RouteOptimizerScreen() {
                 result?.let { r ->
                     Spacer(Modifier.height(20.dp))
                     ResultCard(r)
+                }
+
+                // 고급 설정: 상용 시 공개 데모 서버 대신 자체 인프라를 가리키게 함
+                Spacer(Modifier.height(24.dp))
+                TextButton(onClick = { showAdvanced = !showAdvanced }) {
+                    Text(if (showAdvanced) "고급 설정 닫기" else "고급 설정 (자체 서버·상용)")
+                }
+                if (showAdvanced) {
+                    OutlinedTextField(
+                        value = osrmBase,
+                        onValueChange = { osrmBase = it; lsSet("osrm_base", it.trim()) },
+                        label = { Text("OSRM 서버 주소 (경로 최적화)") },
+                        placeholder = { Text("https://osrm.mycompany.com") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = tileUrl,
+                        onValueChange = { tileUrl = it; lsSet("tile_url", it.trim()) },
+                        label = { Text("지도 타일 URL") },
+                        placeholder = { Text("https://tiles.example.com/{z}/{x}/{y}.png") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        buildString {
+                            append("비워두면 공개 데모 서버(OSRM·OSM 타일)를 쓰는데, 이는 ")
+                            append("개발/테스트용이며 상업적 사용이 금지됩니다. 상용 배포 시 ")
+                            append("자체 호스팅 OSRM 주소와 상용 타일 URL을 넣으세요. (검색·주소는 VWorld 사용)")
+                        },
+                        fontSize = 11.sp,
+                        color = if (osrmBase.isBlank())
+                            MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    )
                 }
             }
         }

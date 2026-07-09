@@ -34,13 +34,25 @@
    - **카카오맵** `kakaomap://` — 출발→도착 (경유지 미지원)
 6. 티맵 호출 실패 시 직선거리 기준 근사 순서로 자동 대체
 
-## 데이터 소스 (키 불필요)
+## 데이터 소스
 
-- **주소 검색**: VWorld(국토부) 도로명·지번 검색 (JSONP)
-- **경로 최적화**: OSRM 공개 서버 `/table`(실도로 시간행렬) + `RouteCore` + `/route`
-  (데모서버라 rate limit·무SLA·비상업 용도)
-- 별도 엔진 선택 UI 없이 위 파이프라인으로 동작한다. (티맵 연동 코드 `TmapClient`는
-  유지되어 있어 필요 시 재노출 가능)
+- **주소·장소 검색**: VWorld(국토부) 도로명·지번 + 장소(POI) 검색 (JSONP, 등록키)
+- **경로 최적화**: OSRM `/table`(실도로 시간행렬) + `RouteCore` + `/route`
+- **지도 타일**: Leaflet + 타일 URL(기본 OSM 공개타일)
+
+### ⚠️ 상업적 사용 주의
+기본값의 **공개 데모 서버는 상업/과다 사용이 금지**됩니다:
+- `router.project-osrm.org`(OSRM 데모) — 개발용만
+- `nominatim.openstreetmap.org`, OSM 공개 타일 — 헤비/상업 금지
+
+**상용 배포 시** 앱 하단 **고급 설정**에서 자체 인프라를 지정하세요:
+- **OSRM 서버 주소**: 자체 호스팅 OSRM(오픈소스 BSD + OSM 데이터 ODbL, 상업 가능).
+  Korea OSM extract 로 `osrm-extract → osrm-partition → osrm-customize → osrm-routed` 실행 후 그 주소 입력.
+- **지도 타일 URL**: 상용 타일(자체 호스팅/유료) 또는 라이선스 확인된 제공자.
+- **검색**: VWorld 는 등록키로 상업 가능(약관·표기 의무 확인).
+
+설정값은 브라우저 localStorage(`osrm_base`, `tile_url`, `tile_attr`)에 저장된다.
+(티맵 연동 코드 `TmapClient` 는 유지 — 필요 시 상용 티맵 계약으로 재노출 가능)
 
 - OSM 무료 모드는 키 없이 **주소→좌표부터 순서 최적화·실도로 경로까지** 전부 동작한다.
 - 지도 렌더: 티맵 결과는 티맵 JS SDK, OSM 결과는 **Leaflet + OSM 타일**(키 불필요).
