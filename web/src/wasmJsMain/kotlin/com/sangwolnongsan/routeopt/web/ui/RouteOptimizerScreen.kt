@@ -335,8 +335,21 @@ private fun AddressRowItem(
         delay(400)
         row.searching = true
         runCatching { VWorldSearch.search(q) }
-            .onSuccess { row.suggestions = it; row.searchError = if (it.isEmpty()) "검색 결과가 없습니다." else null }
-            .onFailure { row.suggestions = emptyList(); row.searchError = "검색 실패: ${it.message}" }
+            .onSuccess {
+                row.suggestions = it
+                row.searchError = if (it.isEmpty())
+                    "검색 결과가 없어요. 도로명·지번 주소나 장소명으로 다시 입력해 보세요."
+                else null
+            }
+            .onFailure {
+                row.suggestions = emptyList()
+                val m = it.message ?: ""
+                row.searchError = when {
+                    m.contains("network", true) || m.contains("timeout", true) ->
+                        "네트워크 연결을 확인해 주세요."
+                    else -> "주소를 불러오지 못했어요. 잠시 후 다시 시도해 주세요."
+                }
+            }
         row.searching = false
     }
 

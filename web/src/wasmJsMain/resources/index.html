@@ -256,6 +256,8 @@
                     window[cb] = function (d) {
                         cleanup();
                         var st = d && d.response && d.response.status;
+                        // NOT_FOUND = 결과 없음 (오류 아님) → 빈 목록으로 처리
+                        if (st === 'NOT_FOUND') { resolve({ items: [], err: null }); return; }
                         if (st !== 'OK') {
                             var e = d && d.response && d.response.error;
                             var msg = e ? ((e.text || '') + (e.code ? ' [' + e.code + ']' : '')) : (st || 'ERROR');
