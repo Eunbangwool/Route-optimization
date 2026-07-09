@@ -221,9 +221,14 @@
                     '&format=json&errorformat=json&key=' + VWORLD_KEY +
                     '&query=' + encodeURIComponent(q);
                 return fetch(url).then(function (r) { return r.json(); }).then(function (d) {
-                    if (!d || !d.response || d.response.status !== 'OK') return [];
+                    var st = d && d.response && d.response.status;
+                    if (st !== 'OK') {
+                        var e = d && d.response && d.response.error;
+                        var msg = e ? ((e.text || '') + (e.code ? ' [' + e.code + ']' : '')) : (st || 'ERROR');
+                        return { items: [], err: (msg || 'ERROR') };
+                    }
                     var items = (d.response.result && d.response.result.items) || [];
-                    return items.filter(function (it) { return it.point && it.address; }).map(function (it) {
+                    var out = items.filter(function (it) { return it.point && it.address; }).map(function (it) {
                         return {
                             label: it.address.road || it.address.parcel || '',
                             sub: (it.address.zipcode || '') + (it.address.parcel && it.address.road ? ' · ' + it.address.parcel : ''),
@@ -231,19 +236,25 @@
                             lon: parseFloat(it.point.x),
                         };
                     }).filter(function (c) { return c.label && !isNaN(c.lat) && !isNaN(c.lon); });
-                }).catch(function () { return []; });
+                    return { items: out, err: null };
+                }).catch(function (e) { return { items: [], err: 'network: ' + (e && e.message || e) }; });
             }
-            // 도로명 우선 + 지번 병합, 중복 라벨 제거
+            // 도로명 우선 + 지번 병합, 중복 라벨 제거. { items, error } 반환.
             window.roSearchAddress = function (query) {
                 var q = (query || '').trim();
-                if (!q) return Promise.resolve('[]');
+                if (!q) return Promise.resolve(JSON.stringify({ items: [], error: null }));
                 return Promise.all([reqCat(q, 'ROAD'), reqCat(q, 'PARCEL')]).then(function (res) {
                     var seen = {}, out = [];
-                    res[0].concat(res[1]).forEach(function (c) {
-                        if (!seen[c.label]) { seen[c.label] = 1; out.push(c); }
+                    res.forEach(function (r) {
+                        (r.items || []).forEach(function (c) {
+                            if (!seen[c.label]) { seen[c.label] = 1; out.push(c); }
+                        });
                     });
-                    return JSON.stringify(out.slice(0, 8));
-                }).catch(function () { return '[]'; });
+                    var err = out.length ? null : (res[0].err || res[1].err || null);
+                    return JSON.stringify({ items: out.slice(0, 8), error: err });
+                }).catch(function (e) {
+                    return JSON.stringify({ items: [], error: String(e) });
+                });
             };
         })();
     </script>

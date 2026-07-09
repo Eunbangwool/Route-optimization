@@ -75,6 +75,7 @@ private class AddressRow {
     var picked by mutableStateOf<Suggestion?>(null)
     var suggestions by mutableStateOf<List<Suggestion>>(emptyList())
     var searching by mutableStateOf(false)
+    var searchError by mutableStateOf<String?>(null)
 }
 
 @Composable
@@ -255,10 +256,12 @@ private fun AddressRowItem(
     LaunchedEffect(row.query) {
         if (row.picked != null) return@LaunchedEffect
         val q = row.query.trim()
-        if (q.length < 2) { row.suggestions = emptyList(); return@LaunchedEffect }
+        if (q.length < 2) { row.suggestions = emptyList(); row.searchError = null; return@LaunchedEffect }
         delay(400)
         row.searching = true
-        row.suggestions = runCatching { VWorldSearch.search(q) }.getOrDefault(emptyList())
+        runCatching { VWorldSearch.search(q) }
+            .onSuccess { row.suggestions = it; row.searchError = if (it.isEmpty()) "검색 결과가 없습니다." else null }
+            .onFailure { row.suggestions = emptyList(); row.searchError = "검색 실패: ${it.message}" }
         row.searching = false
     }
 
@@ -287,6 +290,12 @@ private fun AddressRowItem(
             Text(
                 "✓ 선택됨" + (row.picked!!.sub?.let { " · $it" } ?: ""),
                 fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.padding(start = 44.dp, top = 2.dp),
+            )
+        } else if (row.searchError != null) {
+            Text(
+                row.searchError!!,
+                fontSize = 11.sp, color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(start = 44.dp, top = 2.dp),
             )
         } else if (row.suggestions.isNotEmpty()) {
