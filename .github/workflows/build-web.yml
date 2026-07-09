@@ -89,7 +89,7 @@ jobs:
       # ⚠️ 배포는 main 에서만. claude/** 브랜치는 빌드·검증만 하고 배포하지 않음
       #    (여러 작업 브랜치가 같은 gh-pages 를 덮어쓰는 충돌 방지).
       - name: 🚀 GitHub Pages 배포 (gh-pages 브랜치)
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: success() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
