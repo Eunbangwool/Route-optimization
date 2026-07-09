@@ -51,10 +51,16 @@ jobs:
       - name: gradlew 실행 권한 부여
         run: chmod +x gradlew
 
+      # 최적화 알고리즘 정합성 테스트 (Held-Karp 브루트포스 대조 등)
+      - name: 알고리즘 테스트 (:shared:jvmTest)
+        run: |
+          set -o pipefail
+          ./gradlew :shared:jvmTest --stacktrace 2>&1 | tee web-build.log
+
       - name: Web (WASM) 프로덕션 빌드
         run: |
           set -o pipefail
-          ./gradlew :web:wasmJsBrowserDistribution --stacktrace 2>&1 | tee web-build.log
+          ./gradlew :web:wasmJsBrowserDistribution --stacktrace 2>&1 | tee -a web-build.log
 
       - name: 빌드 산출물 확인
         run: |

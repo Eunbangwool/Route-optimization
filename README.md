@@ -6,8 +6,21 @@
 - **스택**: Kotlin Multiplatform + Compose Multiplatform (Kotlin/WASM), 브라우저 단독 동작
   (농작이 `farm-work-manager` 와 동일 스택)
 - **모듈**
-  - `:shared` — 순수 Kotlin 도메인 모델 + 직선거리(haversine) fallback 최적화(TSP: 최근접이웃+2-opt)
-  - `:web` — Compose MP UI + 티맵 REST 연동(지오코딩·경로최적화) + 티맵 JS SDK 지도
+  - `:shared` — 순수 Kotlin 도메인 모델 + **TSP 최적화 코어(`RouteCore`)**
+  - `:web` — Compose MP UI + 지도 API 연동(VWorld 검색 / OSRM·티맵 최적화) + 지도 렌더
+
+## 최적화 알고리즘 (`RouteCore`)
+
+비용 행렬 기반 TSP 솔버 (비대칭 행렬 지원, 출발·도착 고정, 왕복 지원):
+
+- **경유지 ≤ 15개**: **Held-Karp 동적계획법** — 해당 비용행렬 기준 **전역 최적해 보장**
+  (시간 `O(2^m·m²)`, 공간 `O(2^m·m)` — m=15 에서 수 MB/수십 ms)
+- **경유지 16개+**: **Iterated Local Search** — 다중 구성(최근접이웃×3 + 최소삽입)
+  → 2-opt/Or-opt 지역탐색(비대칭 정확 delta) → double-bridge 교란 반복 (시간 예산 내)
+- OSM 모드는 OSRM **`/table`** 로 실도로 소요시간 행렬을 받아 위 솔버로 순서를 풀고
+  **`/route`** 로 최종 경로를 확정한다 → OSRM 자체 `/trip` 휴리스틱보다 우수.
+  (`/table` 실패 시 `/trip` fallback)
+- 정합성은 `:shared:jvmTest` 에서 **브루트포스 전수해와 대조**로 검증 (CI 자동 실행).
 
 ## 동작 방식
 
@@ -23,10 +36,12 @@
 
 ## 경로 엔진 (앱 상단에서 선택)
 
-| 엔진 | 지오코딩 | 최적화 | 키 | 비고 |
-|------|----------|--------|----|------|
-| **티맵** | `geo/fullAddrGeo`·`pois` | `routeOptimization20` | 필요 | 한국 주소 정확도 높음 |
-| **OSM 무료** | Nominatim(OSM) | OSRM 공개 데모 `/trip` | **불필요** | 데모서버(rate limit·무SLA·비상업), 정확도 낮을 수 있음 |
+| 엔진 | 최적화 | 키 | 비고 |
+|------|--------|----|------|
+| **OSM 무료** (기본) | OSRM `/table` 행렬 + `RouteCore`(≤15 전역최적 / ILS) + `/route` | **불필요** | 데모서버(rate limit·무SLA·비상업) |
+| **티맵** | `routeOptimization20` (서버측 휴리스틱, 경유지 ≤20) | 필요 | 국내 교통 반영 |
+
+주소 검색은 엔진과 무관하게 **VWorld(국토부)** 도로명·지번 검색을 사용한다.
 
 - OSM 무료 모드는 키 없이 **주소→좌표부터 순서 최적화·실도로 경로까지** 전부 동작한다.
 - 지도 렌더: 티맵 결과는 티맵 JS SDK, OSM 결과는 **Leaflet + OSM 타일**(키 불필요).

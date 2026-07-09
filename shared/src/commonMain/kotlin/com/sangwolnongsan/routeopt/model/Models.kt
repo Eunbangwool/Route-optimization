@@ -47,6 +47,8 @@ data class OptimizedRoute(
     val totalTimeSeconds: Int,
     val source: RouteSource,
     val polyline: List<LatLng> = emptyList(),
+    /** 방문 순서가 (해당 비용행렬 기준) Held-Karp 전역 최적해로 보장되는지. */
+    val exactOrder: Boolean = false,
 )
 
 @Serializable

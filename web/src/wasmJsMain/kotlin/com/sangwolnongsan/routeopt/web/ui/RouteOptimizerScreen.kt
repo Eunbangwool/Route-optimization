@@ -348,8 +348,12 @@ private fun ResultCard(r: OptimizedRoute) {
             Text(
                 when (r.source) {
                     RouteSource.TMAP -> "티맵 실도로 기준"
-                    RouteSource.OSRM -> "OSRM / OSM 실도로 기준 (무료)"
-                    RouteSource.STRAIGHT_LINE -> "직선거리 기준 (근사치)"
+                    RouteSource.OSRM ->
+                        if (r.exactOrder) "OSM 실도로 시간행렬 · 방문순서 전역 최적 보장"
+                        else "OSM 실도로 기준 (휴리스틱 최적화)"
+                    RouteSource.STRAIGHT_LINE ->
+                        if (r.exactOrder) "직선거리 기준 근사 · 순서는 직선거리상 최적"
+                        else "직선거리 기준 (근사치)"
                 },
                 fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
             )

@@ -7,6 +7,7 @@ import com.sangwolnongsan.routeopt.model.OptimizedRoute
 import com.sangwolnongsan.routeopt.model.Place
 import com.sangwolnongsan.routeopt.model.RouteLeg
 import com.sangwolnongsan.routeopt.model.RouteSource
+import com.sangwolnongsan.routeopt.optimize.RouteCore
 import com.sangwolnongsan.routeopt.web.route.RouteProvider
 import com.sangwolnongsan.routeopt.web.route.Suggestion
 import com.sangwolnongsan.routeopt.web.util.httpGetText
@@ -25,7 +26,10 @@ class OsrmException(message: String) : Exception(message)
 /**
  * 키 불필요 무료 경로 제공자.
  *  - 지오코딩: Nominatim (OpenStreetMap)
- *  - 최적화: OSRM 공개 데모 서버 /trip (TSP 방문순서 + 실도로 경로/거리/시간)
+ *  - 최적화(1차): /table 로 실도로 소요시간 행렬 → RouteCore 가 방문순서 계산
+ *    (경유지 ≤ 15 는 Held-Karp **전역 최적**, 그 이상은 ILS) → /route 로 최종
+ *    경로/거리/시간/폴리라인 확정. OSRM 자체 /trip 휴리스틱보다 우수하다.
+ *  - 최적화(fallback): /table 실패 시 기존 /trip.
  *
  * 공개 데모 서버라 rate limit(대략 초당 1회)·무SLA·비상업 용도. 한국 주소 정확도는
  * OSM 데이터 특성상 티맵/카카오보다 낮을 수 있다.
@@ -72,6 +76,97 @@ class OsrmClient : RouteProvider {
     }
 
     override suspend fun optimize(start: Place, vias: List<Place>, end: Place, roundTrip: Boolean): OptimizedRoute {
+        // 1차: 시간행렬 + RouteCore (전역최적/ILS). 실패 시 기존 /trip 휴리스틱.
+        return try {
+            tableOptimize(start, vias, end, roundTrip)
+        } catch (e: Throwable) {
+            tripOptimize(start, vias, end, roundTrip)
+        }
+    }
+
+    /**
+     * /table 로 n×n 실도로 소요시간 행렬을 받아 RouteCore 로 방문순서를 풀고,
+     * 확정 순서로 /route 를 호출해 실도로 폴리라인·구간별 거리/시간을 얻는다.
+     *
+     * 왕복은 도착 노드를 출발 좌표 복제로 두는 open-path 정식화 — TSP 관점에서
+     * roundtrip 과 동치이며 행렬 행/열이 그대로 유효하다.
+     */
+    private suspend fun tableOptimize(start: Place, vias: List<Place>, end: Place, roundTrip: Boolean): OptimizedRoute {
+        val pts = buildList {
+            add(start)
+            addAll(vias)
+            add(if (roundTrip) start else end)
+        }
+        val n = pts.size
+        val coordStr = pts.joinToString(";") { "${it.coord!!.lon},${it.coord!!.lat}" }
+
+        // ---- 1) 시간행렬 ----
+        val tUrl = "$osrm/table/v1/driving/$coordStr?annotations=duration"
+        val tText = httpGetText(tUrl).await<JsString>().toString()
+        val tRoot = json.parseToJsonElement(tText).jsonObject
+        if (tRoot["code"]?.jsonPrimitive?.contentOrNull != "Ok") {
+            throw OsrmException(tRoot["message"]?.jsonPrimitive?.contentOrNull ?: "table 실패")
+        }
+        val durRows = tRoot["durations"]?.jsonArray ?: throw OsrmException("durations 없음")
+        if (durRows.size != n) throw OsrmException("durations 크기 불일치")
+        val mat = Array(n) { i ->
+            val row = durRows[i].jsonArray
+            DoubleArray(n) { j ->
+                // null = 경로 불가 → 매우 큰 비용으로 회피 유도
+                row.getOrNull(j)?.jsonPrimitive?.doubleOrNull ?: 1e9
+            }
+        }
+
+        // ---- 2) 방문순서 (경유지 ≤15 전역최적 Held-Karp / 이상 ILS) ----
+        val res = RouteCore.optimizeOrder(mat, roundTrip = false)
+        val ordered = res.order.map { pts[it] }
+
+        // ---- 3) 확정 순서의 실도로 경로 ----
+        val rCoord = ordered.joinToString(";") { "${it.coord!!.lon},${it.coord!!.lat}" }
+        val rUrl = "$osrm/route/v1/driving/$rCoord?overview=full&geometries=geojson&steps=false"
+        val rText = httpGetText(rUrl).await<JsString>().toString()
+        val rRoot = json.parseToJsonElement(rText).jsonObject
+        if (rRoot["code"]?.jsonPrimitive?.contentOrNull != "Ok") {
+            throw OsrmException(rRoot["message"]?.jsonPrimitive?.contentOrNull ?: "route 실패")
+        }
+        val route = rRoot["routes"]?.jsonArray?.firstOrNull()?.jsonObject
+            ?: throw OsrmException("routes 없음")
+
+        val legsJson = route["legs"]?.jsonArray
+        val legs = ArrayList<RouteLeg>()
+        if (legsJson != null) {
+            for (i in 0 until minOf(legsJson.size, ordered.size - 1)) {
+                val lo = legsJson[i].jsonObject
+                val d = lo["distance"]?.jsonPrimitive?.doubleOrNull ?: 0.0
+                val t = lo["duration"]?.jsonPrimitive?.doubleOrNull ?: 0.0
+                legs.add(RouteLeg(ordered[i], ordered[i + 1], d.toInt(), t.toInt()))
+            }
+        }
+        val polyline = ArrayList<LatLng>()
+        route["geometry"]?.jsonObject?.get("coordinates")?.jsonArray?.forEach { c ->
+            val a = c.jsonArray
+            val lon = a.getOrNull(0)?.jsonPrimitive?.doubleOrNull
+            val lat = a.getOrNull(1)?.jsonPrimitive?.doubleOrNull
+            if (lon != null && lat != null) polyline.add(LatLng(lat, lon))
+        }
+        val totalDist = route["distance"]?.jsonPrimitive?.doubleOrNull
+            ?: legs.sumOf { it.distanceMeters.toDouble() }
+        val totalTime = route["duration"]?.jsonPrimitive?.doubleOrNull
+            ?: legs.sumOf { it.timeSeconds.toDouble() }
+
+        return OptimizedRoute(
+            orderedPlaces = ordered,
+            legs = legs,
+            totalDistanceMeters = totalDist.toInt(),
+            totalTimeSeconds = totalTime.toInt(),
+            source = RouteSource.OSRM,
+            polyline = polyline,
+            exactOrder = res.exact,
+        )
+    }
+
+    /** (fallback) OSRM /trip — 서버측 TSP 휴리스틱. */
+    private suspend fun tripOptimize(start: Place, vias: List<Place>, end: Place, roundTrip: Boolean): OptimizedRoute {
         // 입력 좌표 순서: [출발] + 경유지들 (+ [도착] — 왕복이 아닐 때)
         val inputs = buildList {
             add(start)
