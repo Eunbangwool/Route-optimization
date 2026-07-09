@@ -309,11 +309,26 @@
                     req(q, 'address', 'ROAD'),
                     req(q, 'address', 'PARCEL'),
                 ]).then(function (res) {
+                    // 중복 제거: 도로명/지번/장소 검색이 같은 주소를 서로 다른 좌표
+                    // (도로 기준점·필지 중심·POI 지점)로 반환하므로 좌표를 키에 쓰면 못 걸러낸다.
+                    // → 텍스트(label|sub) 완전일치 + 같은 label 이 ~200m 이내면 같은 곳으로 병합.
                     var seen = {}, out = [];
+                    function near(a, b) {
+                        return Math.abs(a.lat - b.lat) < 0.002 && Math.abs(a.lon - b.lon) < 0.0025;
+                    }
                     res.forEach(function (r) {
                         (r.items || []).forEach(function (c) {
-                            var key = c.label + '|' + c.lat.toFixed(5) + '|' + c.lon.toFixed(5);
-                            if (!seen[key]) { seen[key] = 1; out.push(c); }
+                            var key = c.label + '|' + (c.sub || '');
+                            if (seen[key]) return;
+                            for (var i = 0; i < out.length; i++) {
+                                if (out[i].label === c.label && near(out[i], c)) {
+                                    // 기존 항목에 부제(주소)가 없으면 채워넣고 버린다
+                                    if (!out[i].sub && c.sub) out[i].sub = c.sub;
+                                    return;
+                                }
+                            }
+                            seen[key] = 1;
+                            out.push(c);
                         });
                     });
                     var err = out.length ? null : (res[0].err || res[1].err || res[2].err || null);
