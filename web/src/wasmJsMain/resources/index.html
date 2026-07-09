@@ -158,7 +158,9 @@
                 if (_leaflet) { _leaflet.remove(); _leaflet = null; }
                 var markers = data.markers || [];
                 var center = markers.length > 0 ? [markers[0].lat, markers[0].lon] : [37.5665, 126.9780];
-                _leaflet = L.map('ro-map-canvas').setView(center, 12);
+                // 단일 지점(후보 미리보기)이면 더 확대
+                var initZoom = markers.length === 1 ? 16 : 12;
+                _leaflet = L.map('ro-map-canvas').setView(center, initZoom);
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
                     { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(_leaflet);
                 var pts = [];

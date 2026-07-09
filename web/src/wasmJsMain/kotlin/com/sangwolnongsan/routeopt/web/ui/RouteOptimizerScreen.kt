@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -337,19 +338,26 @@ private fun AddressRowItem(
             ) {
                 Column {
                     row.suggestions.forEachIndexed { idx, s ->
-                        Column(
-                            Modifier.fillMaxWidth()
-                                .clickable {
-                                    row.picked = s
-                                    row.query = s.label
-                                    row.suggestions = emptyList()
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(
+                                Modifier.weight(1f)
+                                    .clickable {
+                                        row.picked = s
+                                        row.query = s.label
+                                        row.suggestions = emptyList()
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                            ) {
+                                Text(s.label, fontSize = 14.sp)
+                                s.sub?.let {
+                                    Text(it, fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
                                 }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                        ) {
-                            Text(s.label, fontSize = 14.sp)
-                            s.sub?.let {
-                                Text(it, fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
+                            }
+                            // 후보의 지도상 위치 미리보기 (선택 전 위치 확인)
+                            IconButton(onClick = { showSuggestionOnMap(s) }) {
+                                Icon(Icons.Default.Place, contentDescription = "지도에서 위치 보기",
+                                    tint = MaterialTheme.colorScheme.primary)
                             }
                         }
                         if (idx < row.suggestions.lastIndex) HorizontalDivider()
@@ -552,6 +560,12 @@ private fun showMap(r: OptimizedRoute) {
     // TMAP 결과는 티맵 JS SDK(키 필요), 그 외(OSRM 등)는 Leaflet+OSM 타일(키 불필요)로 렌더
     val engine = if (r.source == RouteSource.TMAP) "tmap" else "osm"
     roShowMap(mapJson.encodeToString(MapPayload.serializer(), MapPayload(engine, markers, path)))
+}
+
+/** 검색 후보 한 지점만 지도(OSM)에 표시 — 선택 전 위치 확인용. */
+private fun showSuggestionOnMap(s: Suggestion) {
+    val marker = MapMarker(s.coord.lat, s.coord.lon, s.label)
+    roShowMap(mapJson.encodeToString(MapPayload.serializer(), MapPayload("osm", listOf(marker), emptyList())))
 }
 
 // ---- 포맷 ----
