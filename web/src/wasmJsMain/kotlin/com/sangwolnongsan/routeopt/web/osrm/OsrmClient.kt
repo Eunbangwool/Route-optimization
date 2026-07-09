@@ -16,6 +16,7 @@ import kotlin.js.JsString
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.await
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
@@ -132,17 +133,38 @@ class OsrmClient : RouteProvider {
         val res = RouteCore.optimizeOrder(mat, roundTrip = false)
         val ordered = res.order.map { pts[it] }
 
-        // ---- 3) 확정 순서의 실도로 경로 ----
+        // ---- 3) 확정 순서의 실도로 경로 (+ 대안 경로 후보) ----
+        //  alternatives=N: OSRM 은 출발·도착 2점 경로에서만 대안을 계산하고, 경유지가 있으면
+        //  보통 1개만 반환한다. → 2점(A→B) 요청에서 선택지가 나타나고, 다지점은 단일 경로.
         val rCoord = ordered.joinToString(";") { "${it.coord!!.lon},${it.coord!!.lat}" }
-        val rUrl = "$base/route/v1/driving/$rCoord?overview=full&geometries=geojson&steps=false"
+        val rUrl = "$base/route/v1/driving/$rCoord?alternatives=3&overview=full&geometries=geojson&steps=false"
         val rText = httpGetText(rUrl).await<JsString>().toString()
         val rRoot = json.parseToJsonElement(rText).jsonObject
         if (rRoot["code"]?.jsonPrimitive?.contentOrNull != "Ok") {
             throw OsrmException(rRoot["message"]?.jsonPrimitive?.contentOrNull ?: "route 실패")
         }
-        val route = rRoot["routes"]?.jsonArray?.firstOrNull()?.jsonObject
+        val routes = rRoot["routes"]?.jsonArray?.takeIf { it.isNotEmpty() }
             ?: throw OsrmException("routes 없음")
 
+        // 후보별로 OptimizedRoute 구성 (방문순서는 공통, 경로/거리/시간만 다름).
+        val candidates = routes.mapIndexed { idx, rt ->
+            parseRouteCandidate(
+                rt.jsonObject, ordered, res.exact,
+                label = if (idx == 0) "추천" else "대안 $idx",
+            )
+        }
+        val primary = candidates.first()
+        // 후보가 2개 이상이면 primary 에 전체 목록을 담아 UI 가 선택지를 그리게 한다.
+        return if (candidates.size > 1) primary.copy(alternatives = candidates) else primary
+    }
+
+    /** OSRM route 응답의 단일 route 오브젝트 → OptimizedRoute (대안 없음). */
+    private fun parseRouteCandidate(
+        route: JsonObject,
+        ordered: List<Place>,
+        exact: Boolean,
+        label: String,
+    ): OptimizedRoute {
         val legsJson = route["legs"]?.jsonArray
         val legs = ArrayList<RouteLeg>()
         if (legsJson != null) {
@@ -172,7 +194,8 @@ class OsrmClient : RouteProvider {
             totalTimeSeconds = totalTime.toInt(),
             source = RouteSource.OSRM,
             polyline = polyline,
-            exactOrder = res.exact,
+            exactOrder = exact,
+            label = label,
         )
     }
 

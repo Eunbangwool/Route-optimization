@@ -94,6 +94,8 @@ fun RouteOptimizerScreen() {
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var result by remember { mutableStateOf<OptimizedRoute?>(null) }
+    // 여러 경로 후보 중 사용자가 고른 것 (0 = 추천). result 가 바뀌면 0 으로 초기화.
+    var selectedAlt by remember { mutableStateOf(0) }
     var saved by remember { mutableStateOf(SavedRoutes.load()) }
     var showAdvanced by remember { mutableStateOf(false) }
     var osrmBase by remember { mutableStateOf(lsGet("osrm_base")) }
@@ -157,15 +159,14 @@ fun RouteOptimizerScreen() {
                 val vias = if (roundTrip) places.drop(1) else places.subList(1, places.size - 1).toList()
 
                 status = "최적 경로 계산 중…"
-                result = if (vias.isEmpty()) {
-                    StraightLineOptimizer.optimize(start, emptyList(), end)
-                } else {
-                    try {
-                        client.optimize(start, vias, end, roundTrip)
-                    } catch (e: Throwable) {
-                        error = "실도로 최적화 실패 → 직선거리 기준으로 대체했습니다. (${e.message})"
-                        StraightLineOptimizer.optimize(start, vias, end)
-                    }
+                // 경유지가 없어도(A→B) 실도로 경로·대안 후보를 얻기 위해 OSRM 을 호출한다.
+                // 실패 시에만 직선거리로 대체.
+                selectedAlt = 0
+                result = try {
+                    client.optimize(start, vias, end, roundTrip)
+                } catch (e: Throwable) {
+                    error = "실도로 최적화 실패 → 직선거리 기준으로 대체했습니다. (${e.message})"
+                    StraightLineOptimizer.optimize(start, vias, end)
                 }
             } catch (e: Throwable) {
                 error = "오류: ${e.message}"
@@ -276,7 +277,7 @@ fun RouteOptimizerScreen() {
 
                 result?.let { r ->
                     Spacer(Modifier.height(20.dp))
-                    ResultCard(r)
+                    ResultCard(r, selectedAlt) { selectedAlt = it }
                 }
 
                 // 고급 설정: 상용 시 공개 데모 서버 대신 자체 인프라를 가리키게 함
@@ -411,7 +412,10 @@ private fun AddressRowItem(
 }
 
 @Composable
-private fun ResultCard(r: OptimizedRoute) {
+private fun ResultCard(routeSet: OptimizedRoute, selectedIndex: Int, onSelect: (Int) -> Unit) {
+    // 후보 목록: alternatives 가 있으면 그것을, 없으면 단일 경로.
+    val alts = routeSet.alternatives.ifEmpty { listOf(routeSet) }
+    val sel = alts[selectedIndex.coerceIn(0, alts.lastIndex)]
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -420,19 +424,27 @@ private fun ResultCard(r: OptimizedRoute) {
             val mobile = remember { isMobileDevice() }
             var navApp by remember { mutableStateOf(NavApp.NAVER) }
 
+            // 경로 선택지 (후보 2개 이상일 때만)
+            if (alts.size > 1) {
+                RouteOptions(alts, selectedIndex.coerceIn(0, alts.lastIndex), onSelect)
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(12.dp))
+            }
+
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Metric("총 거리", formatKm(r.totalDistanceMeters))
-                Metric("예상 시간", formatDuration(r.totalTimeSeconds))
+                Metric("총 거리", formatKm(sel.totalDistanceMeters))
+                Metric("예상 시간", formatDuration(sel.totalTimeSeconds))
             }
             Spacer(Modifier.height(4.dp))
             Text(
-                when (r.source) {
+                when (sel.source) {
                     RouteSource.TMAP -> "티맵 실도로 기준"
                     RouteSource.OSRM ->
-                        if (r.exactOrder) "OSM 실도로 시간행렬 · 방문순서 전역 최적 보장"
+                        if (sel.exactOrder) "OSM 실도로 시간행렬 · 방문순서 전역 최적 보장"
                         else "OSM 실도로 기준 (휴리스틱 최적화)"
                     RouteSource.STRAIGHT_LINE ->
-                        if (r.exactOrder) "직선거리 기준 근사 · 순서는 직선거리상 최적"
+                        if (sel.exactOrder) "직선거리 기준 근사 · 순서는 직선거리상 최적"
                         else "직선거리 기준 (근사치)"
                 },
                 fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
@@ -453,7 +465,7 @@ private fun ResultCard(r: OptimizedRoute) {
             HorizontalDivider()
             Spacer(Modifier.height(12.dp))
 
-            r.orderedPlaces.forEachIndexed { i, p ->
+            sel.orderedPlaces.forEachIndexed { i, p ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.width(28.dp)) {
@@ -474,8 +486,8 @@ private fun ResultCard(r: OptimizedRoute) {
                         ) { Text("안내", fontSize = 13.sp) }
                     }
                 }
-                if (i < r.legs.size) {
-                    val leg = r.legs[i]
+                if (i < sel.legs.size) {
+                    val leg = sel.legs[i]
                     Text(
                         "↓ ${formatKm(leg.distanceMeters)} · ${formatDuration(leg.timeSeconds)}",
                         fontSize = 12.sp, textAlign = TextAlign.Center,
@@ -485,22 +497,23 @@ private fun ResultCard(r: OptimizedRoute) {
                 }
             }
 
-            if (r.polyline.isNotEmpty()) {
+            if (sel.polyline.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
-                Button(onClick = { showMap(r) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("지도에서 경로 보기")
+                Button(onClick = { showMap(alts, selectedIndex.coerceIn(0, alts.lastIndex)) },
+                    modifier = Modifier.fillMaxWidth()) {
+                    Text(if (alts.size > 1) "지도에서 경로 비교" else "지도에서 경로 보기")
                 }
             }
 
             // 전체 경로 한 번에 열기 — 네이버만 경유지 지원(모바일 최대 5, 데스크톱 웹)
-            val withCoords = r.orderedPlaces.filter { it.coord != null }
+            val withCoords = sel.orderedPlaces.filter { it.coord != null }
             if (withCoords.size >= 2) {
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(12.dp))
                 Text("전체 경로 한 번에 열기 (네이버)", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 Spacer(Modifier.height(8.dp))
-                naverUrl(r, mobile)?.let { url ->
+                naverUrl(sel, mobile)?.let { url ->
                     Button(onClick = { openUrl(url) }, modifier = Modifier.fillMaxWidth()) {
                         Text(if (mobile) "네이버 지도로 열기 (경유지 포함)" else "네이버 지도 웹으로 열기")
                     }
@@ -515,6 +528,54 @@ private fun ResultCard(r: OptimizedRoute) {
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                     modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 경로 후보 선택지. 각 후보의 거리·시간을 보여주고, 가장 빠른/짧은 후보에 배지를 단다.
+ * 탭하면 [onSelect] 로 인덱스를 알린다.
+ */
+@Composable
+private fun RouteOptions(alts: List<OptimizedRoute>, selected: Int, onSelect: (Int) -> Unit) {
+    val minTimeIdx = alts.indices.minByOrNull { alts[it].totalTimeSeconds }
+    val minDistIdx = alts.indices.minByOrNull { alts[it].totalDistanceMeters }
+    Text("경로 선택 (${alts.size}개)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Spacer(Modifier.height(6.dp))
+    alts.forEachIndexed { i, a ->
+        val isSel = i == selected
+        val badges = listOfNotNull(
+            if (i == minTimeIdx) "최소 시간" else null,
+            if (i == minDistIdx) "최단 거리" else null,
+        )
+        Card(
+            Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable { onSelect(i) },
+            colors = CardDefaults.cardColors(
+                containerColor = if (isSel) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surfaceVariant,
+            ),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        a.label ?: "경로 ${i + 1}", fontSize = 14.sp,
+                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                    )
+                    badges.forEach { b ->
+                        Spacer(Modifier.width(6.dp))
+                        Text(b, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                Text(
+                    "${formatKm(a.totalDistanceMeters)} · ${formatDuration(a.totalTimeSeconds)}",
+                    fontSize = 13.sp,
+                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
                 )
             }
         }
@@ -590,18 +651,27 @@ private data class MapPayload(
     val engine: String,
     val markers: List<MapMarker>,
     val path: List<List<Double>>,
+    /** 선택되지 않은 대안 경로들 (지도에 흐리게 표시). */
+    val altPaths: List<List<List<Double>>> = emptyList(),
 )
 
 private val mapJson = Json { encodeDefaults = true }
 
-private fun showMap(r: OptimizedRoute) {
-    val markers = r.orderedPlaces.mapIndexedNotNull { i, p ->
+/** 후보 목록과 선택 인덱스를 받아, 선택 경로는 강조·나머지는 흐리게 지도에 그린다. */
+private fun showMap(alts: List<OptimizedRoute>, selectedIndex: Int) {
+    val idx = selectedIndex.coerceIn(0, alts.lastIndex)
+    val sel = alts[idx]
+    val markers = sel.orderedPlaces.mapIndexedNotNull { i, p ->
         p.coord?.let { MapMarker(it.lat, it.lon, "${i + 1}. ${p.address}") }
     }
-    val path = r.polyline.map { listOf(it.lon, it.lat) }
+    val path = sel.polyline.map { listOf(it.lon, it.lat) }
+    val altPaths = alts.filterIndexed { i, _ -> i != idx }
+        .map { a -> a.polyline.map { listOf(it.lon, it.lat) } }
+        .filter { it.size > 1 }
     // TMAP 결과는 티맵 JS SDK(키 필요), 그 외(OSRM 등)는 Leaflet+OSM 타일(키 불필요)로 렌더
-    val engine = if (r.source == RouteSource.TMAP) "tmap" else "osm"
-    roShowMap(mapJson.encodeToString(MapPayload.serializer(), MapPayload(engine, markers, path)))
+    val engine = if (sel.source == RouteSource.TMAP) "tmap" else "osm"
+    roShowMap(mapJson.encodeToString(MapPayload.serializer(),
+        MapPayload(engine, markers, path, altPaths)))
 }
 
 /** 검색 후보 한 지점만 지도(OSM)에 표시 — 선택 전 위치 확인용. */

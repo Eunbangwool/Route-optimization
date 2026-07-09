@@ -150,7 +150,8 @@
         }
 
         // Kotlin 에서 호출: 최적화 결과(JSON)를 받아 지도에 그린다.
-        // payload = { engine:"tmap"|"osm", markers:[{lat,lon,label}], path:[[lon,lat],...] }
+        // payload = { engine:"tmap"|"osm", markers:[{lat,lon,label}], path:[[lon,lat],...],
+        //             altPaths:[[[lon,lat],...], ...] }  ← 선택 안 된 대안 경로들(흐리게)
         window.roShowMap = function (json) {
             var data;
             try { data = JSON.parse(json); } catch (e) { return; }
@@ -185,9 +186,20 @@
                     L.marker([m.lat, m.lon]).addTo(_leaflet).bindPopup((i + 1) + '. ' + m.label);
                     pts.push([m.lat, m.lon]);
                 });
+                // 대안 경로(회색 점선) 먼저 → 선택 경로(파랑)를 위에 겹쳐 강조
+                var altPaths = (data.altPaths || []).map(function (p) {
+                    return p.map(function (c) { return [c[1], c[0]]; });
+                });
+                altPaths.forEach(function (ap) {
+                    if (ap.length > 1) L.polyline(ap, { color: '#94A3B8', weight: 4, opacity: 0.65, dashArray: '6 8' }).addTo(_leaflet);
+                });
                 var path = (data.path || []).map(function (c) { return [c[1], c[0]]; });
                 if (path.length > 1) L.polyline(path, { color: '#3B82F6', weight: 5 }).addTo(_leaflet);
-                var bnds = path.length > 1 ? path : pts;
+                // 경계: 선택 경로 + 대안 경로 + 마커 모두 포함
+                var bnds = [];
+                if (path.length > 1) bnds = bnds.concat(path);
+                altPaths.forEach(function (ap) { bnds = bnds.concat(ap); });
+                if (bnds.length === 0) bnds = pts;
                 if (bnds.length > 1) { try { _leaflet.fitBounds(bnds); } catch (e) {} }
                 setTimeout(function () { try { _leaflet.invalidateSize(); } catch (e) {} }, 120);
             }

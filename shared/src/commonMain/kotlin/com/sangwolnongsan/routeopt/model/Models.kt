@@ -38,6 +38,9 @@ data class RouteLeg(
  * @param totalTimeSeconds 총 이동 시간
  * @param source 결과 출처 (TMAP = 티맵 실도로, STRAIGHT_LINE = 직선거리 fallback)
  * @param polyline 지도에 그릴 실도로 경로 좌표열 (TMAP 결과에만 존재)
+ * @param label 경로 후보 이름 (예: "추천", "대안 1"). 단일 경로면 null.
+ * @param alternatives 같은 방문순서의 경로 후보 목록. 첫 원소가 이 결과(추천)와 동일하며,
+ *   비어 있으면 후보가 하나뿐(단일 경로)임을 뜻한다. 각 후보의 alternatives 는 항상 비어 있다.
  */
 @Serializable
 data class OptimizedRoute(
@@ -49,6 +52,8 @@ data class OptimizedRoute(
     val polyline: List<LatLng> = emptyList(),
     /** 방문 순서가 (해당 비용행렬 기준) Held-Karp 전역 최적해로 보장되는지. */
     val exactOrder: Boolean = false,
+    val label: String? = null,
+    val alternatives: List<OptimizedRoute> = emptyList(),
 )
 
 @Serializable
