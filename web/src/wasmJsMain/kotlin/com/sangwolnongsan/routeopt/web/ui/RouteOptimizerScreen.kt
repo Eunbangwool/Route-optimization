@@ -54,10 +54,12 @@ import com.sangwolnongsan.routeopt.model.OptimizedRoute
 import com.sangwolnongsan.routeopt.model.Place
 import com.sangwolnongsan.routeopt.model.RouteSource
 import com.sangwolnongsan.routeopt.optimize.StraightLineOptimizer
+import com.sangwolnongsan.routeopt.web.data.ProLicense
 import com.sangwolnongsan.routeopt.web.data.SavedPlace
 import com.sangwolnongsan.routeopt.web.data.SavedRoute
 import com.sangwolnongsan.routeopt.web.data.SavedRoutes
 import com.sangwolnongsan.routeopt.web.osrm.OsrmClient
+import com.sangwolnongsan.routeopt.web.tmap.TmapClient
 import com.sangwolnongsan.routeopt.web.route.RouteProvider
 import com.sangwolnongsan.routeopt.web.route.Suggestion
 import com.sangwolnongsan.routeopt.web.tmap.decodeURIComponent
@@ -108,8 +110,16 @@ fun RouteOptimizerScreen() {
     var osrmBase by remember { mutableStateOf(lsGet("osrm_base")) }
     var tileUrl by remember { mutableStateOf(lsGet("tile_url")) }
 
-    // 최적화 엔진: OSRM(무료). 검색은 VWorld(엔진 무관).
-    val client: RouteProvider = remember { OsrmClient() }
+    // 경로 엔진: 기본 OSRM(무료·키 불필요). 티맵 PRO 는 유료 이용권 코드 + 앱키가
+    // 모두 유효할 때만 활성화. 검색은 VWorld(엔진 무관).
+    var engine by remember { mutableStateOf(lsGet("ro_engine").ifBlank { "osrm" }) }
+    var proCode by remember { mutableStateOf(lsGet("ro_pro_code")) }
+    var tmapKey by remember { mutableStateOf(lsGet("tmap_appkey")) }
+    val tmapReady = ProLicense.isValid(proCode) && tmapKey.isNotBlank()
+    val effEngine = if (engine == "tmap" && tmapReady) "tmap" else "osrm"
+    val client: RouteProvider = remember(effEngine, tmapKey) {
+        if (effEngine == "tmap") TmapClient(tmapKey.trim()) else OsrmClient()
+    }
 
     fun pickedPlaces(): List<SavedPlace> = rows.mapNotNull { row ->
         row.picked?.let { SavedPlace(it.label, it.sub, it.coord.lat, it.coord.lon) }
@@ -269,6 +279,33 @@ fun RouteOptimizerScreen() {
                     Text("출발지로 돌아오기 (왕복)")
                 }
 
+                // 경로 엔진 선택 — 티맵 PRO 는 유료 이용권 게이트
+                Spacer(Modifier.height(8.dp))
+                Text("경로 엔진", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    FilterChip(effEngine == "osrm", {
+                        engine = "osrm"; lsSet("ro_engine", "osrm")
+                    }, { Text("기본 (무료)") })
+                    Spacer(Modifier.width(6.dp))
+                    FilterChip(effEngine == "tmap", {
+                        if (tmapReady) {
+                            engine = "tmap"; lsSet("ro_engine", "tmap"); error = null
+                        } else {
+                            showAdvanced = true
+                            error = "티맵 PRO 는 유료 이용권 전용입니다. 고급 설정에 이용권 코드와 티맵 앱키를 입력하세요."
+                        }
+                    }, { Text(if (tmapReady) "티맵 PRO" else "티맵 PRO 🔒") })
+                }
+                if (effEngine == "tmap") {
+                    Text(
+                        "실시간 교통 반영 · 추천/무료우선/최단거리 경로 옵션 제공",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+
                 Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = { runOptimize() },
@@ -355,6 +392,35 @@ fun RouteOptimizerScreen() {
                         placeholder = { Text("https://tiles.example.com/{z}/{x}/{y}.png") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    // 티맵 PRO (유료 이용권): 코드 + 앱키 둘 다 유효해야 열림
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = proCode,
+                        onValueChange = { proCode = it; lsSet("ro_pro_code", it.trim()) },
+                        label = { Text("이용권 코드 (티맵 PRO)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = tmapKey,
+                        onValueChange = { tmapKey = it; lsSet("tmap_appkey", it.trim()) },
+                        label = { Text("티맵 앱키") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        when {
+                            tmapReady -> "티맵 PRO 사용 가능 ✓ — 위 ‘경로 엔진’에서 티맵 PRO 를 선택하세요."
+                            ProLicense.isValid(proCode) -> "이용권 확인됨 — 티맵 앱키를 마저 입력하세요."
+                            else -> "티맵 PRO(실시간 교통·경로옵션)는 유료 이용권 구매 시 코드와 앱키가 제공됩니다."
+                        },
+                        fontSize = 11.sp,
+                        color = if (tmapReady) MaterialTheme.colorScheme.secondary
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(

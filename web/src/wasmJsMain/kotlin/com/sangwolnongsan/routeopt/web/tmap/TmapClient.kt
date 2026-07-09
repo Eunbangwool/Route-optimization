@@ -9,7 +9,11 @@ import com.sangwolnongsan.routeopt.model.RouteLeg
 import com.sangwolnongsan.routeopt.model.RouteSource
 import com.sangwolnongsan.routeopt.web.route.RouteProvider
 import com.sangwolnongsan.routeopt.web.route.Suggestion
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.await
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -90,11 +94,50 @@ class TmapClient(private val appKey: String) : RouteProvider {
         return null
     }
 
+    /** 경로탐색 옵션 — 티맵 searchOption 코드와 사용자 표시 라벨. */
+    private data class SearchOpt(val code: String, val label: String)
+
+    private val searchOpts = listOf(
+        SearchOpt("0", "추천"),        // 교통최적 + 추천
+        SearchOpt("1", "무료우선"),    // 교통최적 + 무료우선
+        SearchOpt("10", "최단거리"),   // 최단거리 (유/무료)
+    )
+
     /**
      * 티맵 경로최적화. [start]→(최적 순서 경유지)→[end].
+     * 옵션(추천/무료우선/최단거리)별로 병렬 요청해 경로 선택지(alternatives)로
+     * 제공한다. 일부 옵션이 실패해도 성공한 것만 노출, 전부 실패 시에만 예외.
      * @param roundTrip true 면 end 는 무시하고 start 로 복귀.
      */
-    override suspend fun optimize(start: Place, vias: List<Place>, end: Place, roundTrip: Boolean): OptimizedRoute {
+    override suspend fun optimize(start: Place, vias: List<Place>, end: Place, roundTrip: Boolean): OptimizedRoute =
+        coroutineScope {
+            val results = searchOpts.map { opt ->
+                async {
+                    try {
+                        requestOptimize(start, vias, end, roundTrip, opt)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        e
+                    }
+                }
+            }.awaitAll()
+            val ok = results.filterIsInstance<OptimizedRoute>()
+            if (ok.isEmpty()) {
+                throw results.filterIsInstance<Throwable>().firstOrNull()
+                    ?: TmapException("티맵 경로 계산 실패")
+            }
+            if (ok.size > 1) ok.first().copy(alternatives = ok) else ok.first()
+        }
+
+    /** 단일 searchOption 으로 경로최적화 1회 호출. */
+    private suspend fun requestOptimize(
+        start: Place,
+        vias: List<Place>,
+        end: Place,
+        roundTrip: Boolean,
+        opt: SearchOpt,
+    ): OptimizedRoute {
         val startC = requireNotNull(start.coord)
         val endC = if (roundTrip) startC else requireNotNull(end.coord)
 
@@ -110,7 +153,7 @@ class TmapClient(private val appKey: String) : RouteProvider {
               "startX":"${startC.lon}","startY":"${startC.lat}",
               "endName":"도착",
               "endX":"${endC.lon}","endY":"${endC.lat}",
-              "searchOption":"0",
+              "searchOption":"${opt.code}",
               "viaPoints":[$viaJson]
             }
         """.trimIndent()
@@ -194,6 +237,7 @@ class TmapClient(private val appKey: String) : RouteProvider {
             totalTimeSeconds = (declaredTime ?: totalTime).toInt(),
             source = RouteSource.TMAP,
             polyline = polyline,
+            label = opt.label,
         )
     }
 

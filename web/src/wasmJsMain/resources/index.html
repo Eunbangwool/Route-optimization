@@ -254,6 +254,11 @@
                     new Tmapv2.Marker({ position: pos, map: _roMap, label: String(i + 1), title: m.label });
                     bounds.extend(pos);
                 });
+                // 대안 경로(회색 점선) 먼저 → 선택 경로(파랑)를 위에 겹쳐 강조
+                (data.altPaths || []).forEach(function (p) {
+                    var ap = p.map(function (c) { return new Tmapv2.LatLng(c[1], c[0]); });
+                    if (ap.length > 1) new Tmapv2.Polyline({ path: ap, strokeColor: '#94A3B8', strokeWeight: 4, strokeStyle: 'dash', map: _roMap });
+                });
                 var path = (data.path || []).map(function (c) { return new Tmapv2.LatLng(c[1], c[0]); });
                 if (path.length > 1) new Tmapv2.Polyline({ path: path, strokeColor: '#3B82F6', strokeWeight: 6, map: _roMap });
                 if (markers.length > 1) { try { _roMap.fitBounds(bounds); } catch (e) {} }
