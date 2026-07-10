@@ -72,15 +72,26 @@ external fun roShareUrlJs(url: String): Promise<JsString>
  */
 suspend fun shareUrl(url: String): String = roShareUrlJs(url).await<JsString>().toString()
 
-/** 브라우저 위치. "위도,경도" 또는 "err:사유". */
+/**
+ * 브라우저 위치. "위도,경도" 또는 "err:사유".
+ * 1차: 저정확도(네트워크 기반·캐시 허용) — 빠르고 실내/데스크톱에서 안정적.
+ * 실패 시 2차: 고정확도(GPS). 출발지 좌표엔 저정확도로 충분하다.
+ */
 @JsFun(
     """() => new Promise((resolve) => {
         if (!navigator.geolocation) { resolve('err:이 브라우저는 위치를 지원하지 않습니다.'); return; }
-        navigator.geolocation.getCurrentPosition(
-            (p) => resolve(p.coords.latitude + ',' + p.coords.longitude),
-            (e) => resolve('err:' + ((e && e.message) ? e.message : '위치 권한이 거부되었습니다.')),
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-        );
+        var done = false;
+        function ok(p) { if (done) return; done = true; resolve(p.coords.latitude + ',' + p.coords.longitude); }
+        function fail(e) {
+            if (done) return; done = true;
+            var m = (e && e.code === 1) ? '위치 권한이 거부되었습니다.'
+                : ((e && e.message) ? e.message : '위치를 가져올 수 없습니다.');
+            resolve('err:' + m);
+        }
+        navigator.geolocation.getCurrentPosition(ok, function () {
+            navigator.geolocation.getCurrentPosition(ok, fail,
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+        }, { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 });
     })""",
 )
 external fun roGetLocation(): Promise<JsString>
