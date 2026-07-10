@@ -36,14 +36,16 @@
         #ro-map {
             position: fixed; inset: 0; z-index: 2147483000; display: none; background: #0B1220;
         }
-        #ro-map-canvas { position: absolute; inset: 0; }
+        /* z-index 1 로 자체 쌓임 맥락 생성 → Leaflet 내부 pane(z 200~700)이
+           이 캔버스 밖으로 새어나와 닫기 버튼을 덮는 것을 막는다. */
+        #ro-map-canvas { position: absolute; inset: 0; z-index: 1; }
         #ro-map-close {
-            position: absolute; top: 12px; right: 12px; z-index: 60;
+            position: absolute; top: 12px; right: 12px; z-index: 10000;
             background: #16202E; color: #fff; border: none; border-radius: 8px;
             padding: 10px 16px; font-size: 15px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.4);
         }
         #ro-map-err {
-            position: absolute; top: 60px; left: 12px; right: 12px; z-index: 60;
+            position: absolute; top: 60px; left: 12px; right: 12px; z-index: 10000;
             background: #7f1d1d; color: #fff; padding: 10px 12px; border-radius: 8px;
             font-size: 13px; display: none;
         }
