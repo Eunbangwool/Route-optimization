@@ -341,6 +341,36 @@
                     document.head.appendChild(s);
                 });
             }
+            // 좌표(WGS84) → 주소 문자열 (역지오코딩). 실패 시 빈 문자열.
+            window.roReverseGeocode = function (lat, lon) {
+                return new Promise(function (resolve) {
+                    var cb = '__vwr_' + (_vwSeq++) + '_' + Math.floor(performance.now());
+                    var s = document.createElement('script');
+                    var timer = setTimeout(function () { cleanup(); resolve(''); }, 8000);
+                    function cleanup() {
+                        clearTimeout(timer);
+                        try { delete window[cb]; } catch (e) { window[cb] = undefined; }
+                        if (s.parentNode) s.parentNode.removeChild(s);
+                    }
+                    window[cb] = function (d) {
+                        cleanup();
+                        var st = d && d.response && d.response.status;
+                        if (st !== 'OK') { resolve(''); return; }
+                        var items = d.response.result || [];
+                        var road = '', parcel = '';
+                        items.forEach(function (it) {
+                            if (it.type === 'road') road = it.text; else if (it.type === 'parcel') parcel = it.text;
+                        });
+                        resolve(road || parcel || (items[0] && items[0].text) || '');
+                    };
+                    s.onerror = function () { cleanup(); resolve(''); };
+                    s.src = 'https://api.vworld.kr/req/address?service=address&request=getAddress' +
+                        '&version=2.0&crs=EPSG:4326&type=both&format=json&errorformat=json' +
+                        '&point=' + lon + ',' + lat + '&key=' + VWORLD_KEY + '&callback=' + cb;
+                    document.head.appendChild(s);
+                });
+            };
+
             // 장소(상호) + 도로명 + 지번 병합, 중복 라벨 제거. { items, error } 반환.
             window.roSearchAddress = function (query) {
                 var q = (query || '').trim();

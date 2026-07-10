@@ -67,8 +67,10 @@ import com.sangwolnongsan.routeopt.web.osrm.OsrmClient
 import com.sangwolnongsan.routeopt.web.tmap.TmapClient
 import com.sangwolnongsan.routeopt.web.route.RouteProvider
 import com.sangwolnongsan.routeopt.web.route.Suggestion
+import com.sangwolnongsan.routeopt.web.tmap.currentLocation
 import com.sangwolnongsan.routeopt.web.tmap.decodeURIComponent
 import com.sangwolnongsan.routeopt.web.tmap.encodeURIComponent
+import com.sangwolnongsan.routeopt.web.tmap.reverseGeocode
 import com.sangwolnongsan.routeopt.web.tmap.locationBaseUrl
 import com.sangwolnongsan.routeopt.web.tmap.locationHash
 import com.sangwolnongsan.routeopt.web.tmap.lsGet
@@ -140,6 +142,29 @@ fun RouteOptimizerScreen() {
         val next = listOf(SavedRoute(name, roundTrip, places)) + saved.filterNot { it.name == name }
         SavedRoutes.persist(next)
         saved = next
+    }
+
+    fun useCurrentLocation() {
+        error = null
+        scope.launch {
+            status = "현재 위치 확인 중…"
+            val loc = runCatching { currentLocation() }.getOrElse { "err:${it.message}" }
+            if (loc.startsWith("err:")) {
+                status = null
+                error = "현재 위치를 가져오지 못했습니다: ${loc.removePrefix("err:")}"
+                return@launch
+            }
+            val parts = loc.split(",")
+            val lat = parts.getOrNull(0)?.trim()?.toDoubleOrNull()
+            val lon = parts.getOrNull(1)?.trim()?.toDoubleOrNull()
+            if (lat == null || lon == null) { status = null; error = "위치 형식 오류"; return@launch }
+            val addr = runCatching { reverseGeocode(lat, lon) }.getOrDefault("")
+            val label = addr.ifBlank { "현재 위치" }
+            // 첫 행(출발지)에 채운다
+            rows[0].picked = Suggestion(label = label, sub = "📍 현재 위치", coord = LatLng(lat, lon))
+            rows[0].query = label
+            status = null
+        }
     }
 
     fun resetAll() {
@@ -289,10 +314,18 @@ fun RouteOptimizerScreen() {
                     )
                 }
                 Spacer(Modifier.height(6.dp))
-                TextButton(onClick = { rows.add(AddressRow()) }) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("주소 추가")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { rows.add(AddressRow()) }) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("주소 추가")
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    TextButton(onClick = { useCurrentLocation() }) {
+                        Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("현재 위치(출발)")
+                    }
                 }
 
                 Spacer(Modifier.height(2.dp))

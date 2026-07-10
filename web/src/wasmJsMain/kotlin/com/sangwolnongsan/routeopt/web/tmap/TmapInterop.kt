@@ -71,3 +71,26 @@ external fun roShareUrlJs(url: String): Promise<JsString>
  * @return "shared" | "copied" | "cancelled" | "failed"
  */
 suspend fun shareUrl(url: String): String = roShareUrlJs(url).await<JsString>().toString()
+
+/** 브라우저 위치. "위도,경도" 또는 "err:사유". */
+@JsFun(
+    """() => new Promise((resolve) => {
+        if (!navigator.geolocation) { resolve('err:이 브라우저는 위치를 지원하지 않습니다.'); return; }
+        navigator.geolocation.getCurrentPosition(
+            (p) => resolve(p.coords.latitude + ',' + p.coords.longitude),
+            (e) => resolve('err:' + ((e && e.message) ? e.message : '위치 권한이 거부되었습니다.')),
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        );
+    })""",
+)
+external fun roGetLocation(): Promise<JsString>
+
+/** 현재 위치. "위도,경도" 또는 "err:사유". */
+suspend fun currentLocation(): String = roGetLocation().await<JsString>().toString()
+
+@JsFun("(lat, lon) => window.roReverseGeocode(lat, lon)")
+external fun roReverseGeocodeJs(lat: Double, lon: Double): Promise<JsString>
+
+/** 좌표 → 주소 문자열 (VWorld 역지오코딩). 실패 시 빈 문자열. */
+suspend fun reverseGeocode(lat: Double, lon: Double): String =
+    roReverseGeocodeJs(lat, lon).await<JsString>().toString()
