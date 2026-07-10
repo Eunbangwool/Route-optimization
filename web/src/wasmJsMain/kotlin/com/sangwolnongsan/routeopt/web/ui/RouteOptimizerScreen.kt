@@ -1,6 +1,5 @@
 package com.sangwolnongsan.routeopt.web.ui
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,7 +11,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -45,8 +49,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sangwolnongsan.routeopt.model.LatLng
@@ -258,14 +263,18 @@ fun RouteOptimizerScreen() {
                 Modifier.widthIn(max = 640.dp).fillMaxWidth().padding(16.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
-                Text("최단 경로 설계", fontSize = 26.sp, fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary)
-                Text("여러 주소의 방문 순서를 실도로 기준으로 최적화합니다. (키 불필요)",
-                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                Spacer(Modifier.height(16.dp))
+                AppHeader()
+                Spacer(Modifier.height(18.dp))
 
-                Text("방문 주소 (검색 후 선택)", fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(8.dp))
+              Card(
+                Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+              ) {
+               Column(Modifier.padding(18.dp)) {
+                SectionLabel("방문 주소", "검색 후 목록에서 선택")
+                Spacer(Modifier.height(10.dp))
                 rows.forEachIndexed { i, row ->
                     val badge = when {
                         i == 0 -> "출발"
@@ -279,23 +288,26 @@ fun RouteOptimizerScreen() {
                         onDelete = { if (rows.size > 2) rows.removeAt(i) },
                     )
                 }
-                Spacer(Modifier.height(4.dp))
-                OutlinedButton(onClick = { rows.add(AddressRow()) }) {
-                    Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(Modifier.height(6.dp))
+                TextButton(onClick = { rows.add(AddressRow()) }) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("주소 추가")
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(2.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = roundTrip, onCheckedChange = { roundTrip = it })
-                    Text("출발지로 돌아오기 (왕복)")
+                    Text("출발지로 돌아오기 (왕복)", fontSize = 14.sp)
                 }
 
+                Spacer(Modifier.height(14.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Spacer(Modifier.height(14.dp))
+
                 // 경로 엔진 선택 — 티맵 PRO 는 유료 이용권 게이트
-                Spacer(Modifier.height(8.dp))
-                Text("경로 엔진", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                Spacer(Modifier.height(4.dp))
+                SectionLabel("경로 엔진")
+                Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     FilterChip(effEngine == "osrm", {
                         engine = "osrm"; lsSet("ro_engine", "osrm")
@@ -319,11 +331,12 @@ fun RouteOptimizerScreen() {
                     )
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(16.dp))
                 Button(
                     onClick = { runOptimize() },
                     enabled = !busy,
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
                 ) {
                     if (busy) {
                         CircularProgressIndicator(Modifier.height(20.dp).width(20.dp),
@@ -335,23 +348,29 @@ fun RouteOptimizerScreen() {
 
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth()) {
-                    OutlinedButton(onClick = { saveCurrent() }, modifier = Modifier.weight(1f)) {
+                    OutlinedButton(onClick = { saveCurrent() }, modifier = Modifier.weight(1f),
+                        shape = MaterialTheme.shapes.medium) {
                         Text("현재 경로 저장")
                     }
                     Spacer(Modifier.width(8.dp))
-                    OutlinedButton(onClick = { resetAll() }, modifier = Modifier.weight(1f)) {
+                    OutlinedButton(onClick = { resetAll() }, modifier = Modifier.weight(1f),
+                        shape = MaterialTheme.shapes.medium) {
                         Text("경로 초기화")
                     }
                 }
+               }
+              }
 
                 if (saved.isNotEmpty()) {
-                    Spacer(Modifier.height(16.dp))
-                    Text("저장된 경로", fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(20.dp))
+                    SectionLabel("저장된 경로")
+                    Spacer(Modifier.height(8.dp))
                     saved.forEach { sr ->
                         Card(
                             Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            shape = MaterialTheme.shapes.medium,
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         ) {
                             Row(
                                 Modifier.fillMaxWidth().padding(start = 12.dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
@@ -375,12 +394,12 @@ fun RouteOptimizerScreen() {
                 }
 
                 status?.let {
-                    Spacer(Modifier.height(8.dp))
-                    Text(it, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    Spacer(Modifier.height(12.dp))
+                    Banner(it, isError = false)
                 }
                 error?.let {
-                    Spacer(Modifier.height(8.dp))
-                    Text(it, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.height(12.dp))
+                    Banner(it, isError = true)
                 }
 
                 result?.let { r ->
@@ -481,15 +500,14 @@ private fun AddressRowItem(
 
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.width(44.dp)) {
-                Text(badge, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary)
-            }
+            RoleBadge(badge)
+            Spacer(Modifier.width(8.dp))
             OutlinedTextField(
                 value = row.query,
                 onValueChange = { row.query = it; row.picked = null },
                 placeholder = { Text("주소·장소 검색") },
                 singleLine = true,
+                shape = MaterialTheme.shapes.small,
                 trailingIcon = if (row.searching) {
                     { CircularProgressIndicator(Modifier.width(18.dp).height(18.dp), strokeWidth = 2.dp) }
                 } else null,
@@ -504,18 +522,20 @@ private fun AddressRowItem(
             Text(
                 "✓ 선택됨" + (row.picked!!.sub?.let { " · $it" } ?: ""),
                 fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary,
-                modifier = Modifier.padding(start = 44.dp, top = 2.dp),
+                modifier = Modifier.padding(start = 42.dp, top = 2.dp),
             )
         } else if (row.searchError != null) {
             Text(
                 row.searchError!!,
                 fontSize = 11.sp, color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(start = 44.dp, top = 2.dp),
+                modifier = Modifier.padding(start = 42.dp, top = 2.dp),
             )
         } else if (row.suggestions.isNotEmpty()) {
             Card(
-                Modifier.fillMaxWidth().padding(start = 44.dp, top = 4.dp),
+                Modifier.fillMaxWidth().padding(start = 42.dp, top = 4.dp),
+                shape = MaterialTheme.shapes.medium,
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 Column {
                     row.suggestions.forEachIndexed { idx, s ->
@@ -561,25 +581,26 @@ private fun ResultCard(
     val sel = alts[selectedIndex.coerceIn(0, alts.lastIndex)]
     Card(
         Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(18.dp)) {
             val mobile = remember { isMobileDevice() }
             var navApp by remember { mutableStateOf(NavApp.NAVER) }
 
             // 경로 선택지 (후보 2개 이상일 때만)
             if (alts.size > 1) {
                 RouteOptions(alts, selectedIndex.coerceIn(0, alts.lastIndex), onSelect)
-                Spacer(Modifier.height(12.dp))
-                HorizontalDivider()
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
             }
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Metric("총 거리", formatKm(sel.totalDistanceMeters))
-                Metric("예상 시간", formatDuration(sel.totalTimeSeconds))
+            Row(Modifier.fillMaxWidth()) {
+                StatTile("총 거리", formatKm(sel.totalDistanceMeters), Modifier.weight(1f))
+                Spacer(Modifier.width(10.dp))
+                StatTile("예상 시간", formatDuration(sel.totalTimeSeconds), Modifier.weight(1f))
             }
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(8.dp))
             Text(
                 when (sel.source) {
                     RouteSource.TMAP -> "티맵 실도로 기준"
@@ -611,47 +632,60 @@ private fun ResultCard(
             sel.orderedPlaces.forEachIndexed { i, p ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.width(28.dp)) {
-                        Text("${i + 1}", fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary)
+                    val isEnd = i == 0 || (i == sel.orderedPlaces.lastIndex)
+                    Box(
+                        Modifier.size(26.dp).clip(CircleShape)
+                            .background(
+                                if (isEnd) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.secondary,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("${i + 1}", fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary)
                     }
+                    Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(p.address, fontSize = 15.sp)
+                        Text(p.address, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                         p.resolvedName?.let {
                             Text(it, fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                     navToUrl(p, navApp, mobile)?.let { url ->
                         OutlinedButton(
                             onClick = { openUrl(url) },
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            shape = MaterialTheme.shapes.small,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
                         ) { Text("안내", fontSize = 13.sp) }
                     }
                 }
                 if (i < sel.legs.size) {
                     val leg = sel.legs[i]
                     Text(
-                        "↓ ${formatKm(leg.distanceMeters)} · ${formatDuration(leg.timeSeconds)}",
-                        fontSize = 12.sp, textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.padding(start = 28.dp),
+                        "↓  ${formatKm(leg.distanceMeters)} · ${formatDuration(leg.timeSeconds)}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 38.dp, top = 2.dp, bottom = 2.dp),
                     )
                 }
             }
 
             if (sel.polyline.isNotEmpty()) {
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
                 Button(onClick = { showMap(alts, selectedIndex.coerceIn(0, alts.lastIndex)) },
-                    modifier = Modifier.fillMaxWidth()) {
-                    Text(if (alts.size > 1) "지도에서 경로 비교" else "지도에서 경로 보기")
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                    Text(if (alts.size > 1) "지도에서 경로 비교" else "지도에서 경로 보기",
+                        fontWeight = FontWeight.SemiBold)
                 }
             }
 
             // 경로 공유: 지점+설정을 URL 해시에 담아 전달 (받는 쪽에서 자동 재계산)
             Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = onShare, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Share, contentDescription = null)
+            OutlinedButton(onClick = onShare, modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = MaterialTheme.shapes.medium) {
+                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("경로 공유 (링크)")
             }
@@ -693,8 +727,8 @@ private fun ResultCard(
 private fun RouteOptions(alts: List<OptimizedRoute>, selected: Int, onSelect: (Int) -> Unit) {
     val minTimeIdx = alts.indices.minByOrNull { alts[it].totalTimeSeconds }
     val minDistIdx = alts.indices.minByOrNull { alts[it].totalDistanceMeters }
-    Text("경로 선택 (${alts.size}개)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-    Spacer(Modifier.height(6.dp))
+    SectionLabel("경로 선택", "${alts.size}개 후보")
+    Spacer(Modifier.height(8.dp))
     alts.forEachIndexed { i, a ->
         val isSel = i == selected
         val badges = listOfNotNull(
@@ -703,30 +737,45 @@ private fun RouteOptions(alts: List<OptimizedRoute>, selected: Int, onSelect: (I
         )
         Card(
             Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable { onSelect(i) },
+            shape = MaterialTheme.shapes.medium,
             colors = CardDefaults.cardColors(
                 containerColor = if (isSel) MaterialTheme.colorScheme.primaryContainer
                 else MaterialTheme.colorScheme.surfaceVariant,
             ),
+            border = if (isSel) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
         ) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // 선택 표시 라디오 점
+                Box(
+                    Modifier.size(16.dp).clip(CircleShape)
+                        .background(
+                            if (isSel) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isSel) Box(Modifier.size(6.dp).clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.onPrimary))
+                }
+                Spacer(Modifier.width(10.dp))
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         a.label ?: "경로 ${i + 1}", fontSize = 14.sp,
                         fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSel) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurface,
                     )
-                    badges.forEach { b ->
-                        Spacer(Modifier.width(6.dp))
-                        Text(b, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary)
-                    }
+                    badges.forEach { b -> Spacer(Modifier.width(6.dp)); Pill(b) }
                 }
                 Text(
                     "${formatKm(a.totalDistanceMeters)} · ${formatDuration(a.totalTimeSeconds)}",
                     fontSize = 13.sp,
                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                    color = if (isSel) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -785,12 +834,115 @@ private fun naverUrl(r: OptimizedRoute, mobile: Boolean): String? {
         "${d.lon},${d.lat},${enc(dName)},,/-/car"
 }
 
+/** 로고 마크 + 제목/부제 헤더. */
 @Composable
-private fun Metric(label: String, value: String) {
-    Column {
-        Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-        Text(value, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+private fun AppHeader() {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(46.dp).clip(MaterialTheme.shapes.medium)
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.secondary,
+                        ),
+                    ),
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Default.Place, contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(26.dp))
+        }
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text("최단 경로 설계", fontSize = 24.sp, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground)
+            Text("여러 주소의 방문 순서를 실도로 기준으로 최적화",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
+}
+
+/** 섹션 제목 (강조 바 + 제목 + 선택적 힌트). */
+@Composable
+private fun SectionLabel(title: String, hint: String? = null) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(width = 3.dp, height = 14.dp).clip(RoundedCornerShape(2.dp))
+                .background(MaterialTheme.colorScheme.primary),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface)
+        hint?.let {
+            Spacer(Modifier.width(8.dp))
+            Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** 출발/도착/경유 역할 원형 배지. */
+@Composable
+private fun RoleBadge(badge: String) {
+    val isStart = badge == "출발"
+    val isEnd = badge == "도착"
+    val bg = when {
+        isStart -> MaterialTheme.colorScheme.primary
+        isEnd -> MaterialTheme.colorScheme.secondary
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val fg = when {
+        isStart -> MaterialTheme.colorScheme.onPrimary
+        isEnd -> MaterialTheme.colorScheme.onSecondary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(Modifier.size(34.dp).clip(CircleShape).background(bg), contentAlignment = Alignment.Center) {
+        Text(badge, fontSize = if (isStart || isEnd) 11.sp else 13.sp,
+            fontWeight = FontWeight.Bold, color = fg)
+    }
+}
+
+/** 거리·시간 통계 타일. */
+@Composable
+private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier.clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(2.dp))
+        Text(value, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+/** 상태(안내)·오류 배너. */
+@Composable
+private fun Banner(text: String, isError: Boolean) {
+    val bg = if (isError) MaterialTheme.colorScheme.errorContainer
+    else MaterialTheme.colorScheme.secondaryContainer
+    val fg = if (isError) MaterialTheme.colorScheme.onErrorContainer
+    else MaterialTheme.colorScheme.onSecondaryContainer
+    Row(
+        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(bg)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, fontSize = 13.sp, color = fg)
+    }
+}
+
+/** 작은 강조 배지 (최소 시간/최단 거리). */
+@Composable
+private fun Pill(text: String) {
+    Text(
+        text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onTertiary,
+        modifier = Modifier.clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.tertiary)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
 }
 
 // ---- 공유 링크 페이로드 ----
