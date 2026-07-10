@@ -184,6 +184,16 @@ fun RouteOptimizerScreen() {
         }
     }
 
+    fun showPickedOnMap() {
+        error = null
+        val pts = rows.mapNotNull { it.picked }
+        if (pts.isEmpty()) {
+            error = "지도에 표시할 주소가 없습니다. 먼저 주소를 선택하세요."; return
+        }
+        val markers = pts.mapIndexed { i, s -> MapMarker(s.coord.lat, s.coord.lon, "${i + 1}. ${s.label}") }
+        roShowMap(mapJson.encodeToString(MapPayload.serializer(), MapPayload("osm", markers, emptyList())))
+    }
+
     fun resetAll() {
         val hasInput = rows.any { it.picked != null || it.query.isNotBlank() } || result != null
         if (hasInput && !jsConfirm("입력한 주소와 계산 결과를 모두 지울까요?")) return
@@ -336,7 +346,7 @@ fun RouteOptimizerScreen() {
                         contentPadding = PaddingValues(horizontal = 10.dp)) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("추가")
+                        Text("주소 추가")
                     }
                     TextButton(onClick = { useCurrentLocation() },
                         contentPadding = PaddingValues(horizontal = 10.dp)) {
@@ -344,11 +354,19 @@ fun RouteOptimizerScreen() {
                         Spacer(Modifier.width(4.dp))
                         Text("내 위치")
                     }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { showPickedOnMap() },
+                        contentPadding = PaddingValues(horizontal = 10.dp)) {
+                        Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("지도 보기")
+                    }
                     TextButton(onClick = { pickFromMap() },
                         contentPadding = PaddingValues(horizontal = 10.dp)) {
                         Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("지도")
+                        Text("지도에서 선택")
                     }
                 }
 
