@@ -588,8 +588,19 @@ private fun AddressRowItem(
                 } else null,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = onDelete, enabled = canDelete) {
-                Icon(Icons.Default.Close, contentDescription = "삭제")
+            // X: 입력한 주소가 있으면 그 행을 비우고(초기화), 이미 비어 있고
+            //    삭제 가능한 추가 행이면 행 자체를 제거.
+            IconButton(onClick = {
+                if (row.query.isNotBlank() || row.picked != null) {
+                    row.query = ""
+                    row.picked = null
+                    row.suggestions = emptyList()
+                    row.searchError = null
+                } else if (canDelete) {
+                    onDelete()
+                }
+            }) {
+                Icon(Icons.Default.Close, contentDescription = "주소 지우기")
             }
         }
 
