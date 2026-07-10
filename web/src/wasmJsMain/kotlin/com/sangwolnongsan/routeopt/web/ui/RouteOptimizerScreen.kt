@@ -75,6 +75,7 @@ import com.sangwolnongsan.routeopt.web.tmap.locationBaseUrl
 import com.sangwolnongsan.routeopt.web.tmap.locationHash
 import com.sangwolnongsan.routeopt.web.tmap.lsGet
 import com.sangwolnongsan.routeopt.web.tmap.lsSet
+import com.sangwolnongsan.routeopt.web.tmap.pickOnMap
 import com.sangwolnongsan.routeopt.web.tmap.roShowMap
 import com.sangwolnongsan.routeopt.web.tmap.shareUrl
 import com.sangwolnongsan.routeopt.web.util.isMobileDevice
@@ -164,6 +165,22 @@ fun RouteOptimizerScreen() {
             rows[0].picked = Suggestion(label = label, sub = "📍 현재 위치", coord = LatLng(lat, lon))
             rows[0].query = label
             status = null
+        }
+    }
+
+    fun pickFromMap() {
+        error = null
+        scope.launch {
+            val res = runCatching { pickOnMap() }.getOrDefault("")
+            if (res.isBlank()) return@launch // 취소/닫기
+            val loc = runCatching { pickJson.decodeFromString(PickedLoc.serializer(), res) }.getOrNull()
+                ?: run { error = "지도 위치를 읽지 못했습니다."; return@launch }
+            val label = loc.address.ifBlank { "지도 선택 위치" }
+            // 빈 행이 있으면 채우고, 없으면 새 행 추가
+            val target = rows.firstOrNull { it.picked == null && it.query.isBlank() }
+                ?: AddressRow().also { rows.add(it) }
+            target.picked = Suggestion(label, "📍 지도 선택", LatLng(loc.lat, loc.lon))
+            target.query = label
         }
     }
 
@@ -315,16 +332,23 @@ fun RouteOptimizerScreen() {
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { rows.add(AddressRow()) }) {
+                    TextButton(onClick = { rows.add(AddressRow()) },
+                        contentPadding = PaddingValues(horizontal = 10.dp)) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("주소 추가")
+                        Spacer(Modifier.width(4.dp))
+                        Text("추가")
                     }
-                    Spacer(Modifier.width(4.dp))
-                    TextButton(onClick = { useCurrentLocation() }) {
+                    TextButton(onClick = { useCurrentLocation() },
+                        contentPadding = PaddingValues(horizontal = 10.dp)) {
                         Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("현재 위치(출발)")
+                        Spacer(Modifier.width(4.dp))
+                        Text("내 위치")
+                    }
+                    TextButton(onClick = { pickFromMap() },
+                        contentPadding = PaddingValues(horizontal = 10.dp)) {
+                        Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("지도")
                     }
                 }
 
@@ -993,6 +1017,12 @@ private data class SharePayload(
 
 /** encodeDefaults=false 로 기본값·null 을 생략해 URL 을 최대한 짧게 유지. */
 private val shareJson = Json { ignoreUnknownKeys = true; encodeDefaults = false }
+
+/** 지도 선택 결과(roPickOnMap 반환 JSON). */
+@Serializable
+private data class PickedLoc(val lat: Double, val lon: Double, val address: String = "")
+
+private val pickJson = Json { ignoreUnknownKeys = true }
 
 // ---- 지도 페이로드 ----
 @Serializable

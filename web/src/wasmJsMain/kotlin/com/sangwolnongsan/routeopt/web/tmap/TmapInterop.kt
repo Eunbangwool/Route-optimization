@@ -94,3 +94,9 @@ external fun roReverseGeocodeJs(lat: Double, lon: Double): Promise<JsString>
 /** 좌표 → 주소 문자열 (VWorld 역지오코딩). 실패 시 빈 문자열. */
 suspend fun reverseGeocode(lat: Double, lon: Double): String =
     roReverseGeocodeJs(lat, lon).await<JsString>().toString()
+
+@JsFun("() => window.roPickOnMap()")
+external fun roPickOnMapJs(): Promise<JsString>
+
+/** 지도 선택 모드. JSON {lat,lon,address} 또는 빈 문자열(취소). */
+suspend fun pickOnMap(): String = roPickOnMapJs().await<JsString>().toString()
