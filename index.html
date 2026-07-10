@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <title>최단 경로 설계 — 여러 주소 방문순서 최적화</title>
+    <meta name="description" content="여러 주소의 방문 순서를 티맵 실도로 기준으로 자동 최적화하는 웹 앱.">
+    <meta name="theme-color" content="#0B1220">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icon-192.png">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="경로설계">
+    <link rel="preconnect" href="https://apis.openapi.sk.com" crossorigin>
+    <link rel="preload" as="script" href="routeopt-web.js?v=69bee30">
+    <style>
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background: #0B1220; color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", sans-serif;
+        }
+        #compose-target { width: 100%; height: 100vh; }
+        /* 로딩 스플래시 */
+        #splash {
+            position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+            flex-direction: column; gap: 14px; background: #0B1220; z-index: 5;
+        }
+        #splash .ring {
+            width: 42px; height: 42px; border: 3px solid #24324a; border-top-color: #3B82F6;
+            border-radius: 50%; animation: spin 0.9s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        /* 지도 오버레이 */
+        #ro-map {
+            position: fixed; inset: 0; z-index: 2147483000; display: none; background: #0B1220;
+        }
+        /* z-index 1 로 자체 쌓임 맥락 생성 → Leaflet 내부 pane(z 200~700)이
+           이 캔버스 밖으로 새어나와 닫기 버튼을 덮는 것을 막는다. */
+        #ro-map-canvas { position: absolute; inset: 0; z-index: 1; }
+        #ro-map-close {
+            position: absolute; top: 12px; right: 12px; z-index: 10000;
+            background: #16202E; color: #fff; border: none; border-radius: 8px;
+            padding: 10px 16px; font-size: 15px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.4);
+        }
+        #ro-map-err {
+            position: absolute; top: 60px; left: 12px; right: 12px; z-index: 10000;
+            background: #7f1d1d; color: #fff; padding: 10px 12px; border-radius: 8px;
+            font-size: 13px; display: none;
+        }
+        /* 지도 선택 모드 하단 시트 */
+        #ro-map-pick {
+            position: absolute; left: 12px; right: 12px; bottom: 16px; z-index: 10000;
+            background: #16202E; color: #fff; border-radius: 14px; padding: 14px 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,.5); display: none;
+        }
+        #ro-map-pick-addr { font-size: 14px; line-height: 1.4; min-height: 20px; word-break: break-all; }
+        #ro-map-pick .row { display: flex; gap: 8px; margin-top: 12px; }
+        #ro-map-pick button {
+            flex: 1; border: none; border-radius: 10px; padding: 12px;
+            font-size: 15px; font-weight: 600; cursor: pointer;
+        }
+        #ro-map-pick-add { background: #3B82F6; color: #fff; }
+        #ro-map-pick-add:disabled { background: #33415a; color: #7e8aa0; cursor: default; }
+        #ro-map-pick-cancel { background: #24324a; color: #cbd5e1; }
+        #ro-map-hint {
+            position: absolute; top: 12px; left: 12px; z-index: 10000;
+            background: rgba(11,18,32,.82); color: #fff; padding: 8px 12px; border-radius: 8px;
+            font-size: 12px; display: none; max-width: 60%;
+        }
+    </style>
+</head>
+<body>
+    <div id="splash">
+        <div class="ring" id="splash-ring"></div>
+        <div id="splash-msg" style="max-width:88%; text-align:center; line-height:1.5;">앱을 불러오는 중…</div>
+        <button id="splash-reload" style="display:none; margin-top:6px; background:#3B82F6; color:#fff; border:none; border-radius:8px; padding:10px 18px; font-size:14px; cursor:pointer;">새로고침</button>
+        <pre id="splash-log" style="display:none; max-width:92%; max-height:40vh; overflow:auto; white-space:pre-wrap; word-break:break-all; background:#111a29; color:#ffd7d7; font-size:11px; padding:10px; border-radius:8px; margin-top:10px;"></pre>
+    </div>
+    <div id="compose-target"></div>
+
+    <!-- 지도 오버레이 (티맵 JS SDK 로 마커 + 실도로 폴리라인 렌더) -->
+    <div id="ro-map">
+        <div id="ro-map-canvas"></div>
+        <div id="ro-map-err"></div>
+        <div id="ro-map-hint">지도를 길게 눌러 위치를 선택하세요</div>
+        <button id="ro-map-close">닫기 ✕</button>
+        <div id="ro-map-pick">
+            <div id="ro-map-pick-addr">지도를 길게 누르면 해당 위치의 주소가 표시됩니다.</div>
+            <div class="row">
+                <button id="ro-map-pick-cancel">취소</button>
+                <button id="ro-map-pick-add" disabled>경로에 추가</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // PWA: 서비스워커 등록 (설치형 + 오프라인 폴백)
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function () {
+                navigator.serviceWorker.register('sw.js').catch(function () {});
+            });
+        }
+
+        // 스플래시: Compose 마운트되면 제거, 오류/지연이면 원인 표시 (무한 스피너 방지)
+        (function () {
+            var target = document.getElementById('compose-target');
+            var mounted = false;
+            function hide() { var s = document.getElementById('splash'); if (s) s.remove(); }
+            function fail(msg) {
+                if (mounted) return;
+                var r = document.getElementById('splash-ring'); if (r) r.style.display = 'none';
+                var m = document.getElementById('splash-msg'); if (m) { m.innerHTML = msg; m.style.fontSize = '13px'; }
+                var b = document.getElementById('splash-reload'); if (b) b.style.display = 'inline-block';
+            }
+            var BROWSER_HINT = '<br><br>안 되면 아래 로그를 복사해서 개발자에게 전달해 주세요.';
+            var logEl = document.getElementById('splash-log');
+            function appendLog(prefix, args) {
+                if (!logEl) return;
+                try {
+                    var parts = Array.prototype.map.call(args, function (a) {
+                        if (a && a.stack) return String(a.stack);
+                        if (a && typeof a === 'object') { try { return JSON.stringify(a); } catch (e) { return String(a); } }
+                        return String(a);
+                    });
+                    logEl.style.display = 'block';
+                    logEl.textContent += prefix + ' ' + parts.join(' ') + '\n';
+                } catch (e) {}
+            }
+            // 콘솔 오류/경고를 화면에도 미러링 (skiko/wasm 내부 오류 포착용)
+            var _ce = console.error ? console.error.bind(console) : function () {};
+            var _cw = console.warn ? console.warn.bind(console) : function () {};
+            console.error = function () { appendLog('ERR', arguments); _ce.apply(null, arguments); };
+            console.warn = function () { appendLog('WARN', arguments); _cw.apply(null, arguments); };
+
+            // Kotlin(Compose)이 첫 프레임에서 호출하는 준비완료 신호 — 스플래시 제거의 정식 경로.
+            // (Compose 는 Shadow DOM 에 canvas 를 렌더해 light-DOM 감지가 불가하므로 이 신호가 필요)
+            window.roAppReady = function () { mounted = true; hide(); };
+
+            // 보조: 혹시 compose-target 에 직접 자식이 붙는 경우도 처리
+            var obs = new MutationObserver(function () {
+                if (target && (target.childElementCount > 0 || target.shadowRoot)) { mounted = true; hide(); obs.disconnect(); }
+            });
+            obs.observe(target, { childList: true, subtree: true });
+            window.addEventListener('error', function (e) {
+                appendLog('WINDOW-ERR', [((e && e.message) || e), (e && e.filename) || '', (e && e.lineno) || '']);
+                fail('앱 로드 오류: ' + ((e && e.message) || e) + BROWSER_HINT);
+            });
+            window.addEventListener('unhandledrejection', function (e) {
+                appendLog('REJECT', [(e && e.reason) || 'unknown']);
+                fail('앱 로드 오류: ' + ((e && e.reason && (e.reason.message || e.reason)) || '알 수 없음') + BROWSER_HINT);
+            });
+            setTimeout(function () {
+                fail('로드가 지연되거나 실패했습니다.' + BROWSER_HINT);
+            }, 30000);
+            var rb = document.getElementById('splash-reload');
+            if (rb) rb.addEventListener('click', function () { location.reload(); });
+        })();
+
+        function roHideMap() {
+            document.getElementById('ro-map').style.display = 'none';
+            var ct = document.getElementById('compose-target');
+            if (ct) { ct.style.visibility = ''; }
+        }
+        document.getElementById('ro-map-close').addEventListener('click', function () {
+            // 선택 모드면 콜백으로 취소를 알린다(취소=빈 결과).
+            if (window._roMapOnClose) { var f = window._roMapOnClose; window._roMapOnClose = null; f(); return; }
+            roHideMap();
+        });
+
+        var _roMap = null;       // 티맵 지도 인스턴스
+        var _leaflet = null;     // Leaflet(OSM) 지도 인스턴스
+
+        // 타일 레이어 추가 — VWorld 국내 지도(다크=midnight), tile_url 설정 시 우선.
+        function roAddTiles(map) {
+            var VWORLD_KEY = '3EBC07F7-1D05-3457-92DF-A4A9AE7DB876';
+            var tileUrl = (localStorage.getItem('tile_url') || '').trim();
+            var tileAttr = (localStorage.getItem('tile_attr') || '').trim();
+            if (!tileUrl) {
+                var dark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                tileUrl = 'https://api.vworld.kr/req/wmts/1.0.0/' + VWORLD_KEY + '/' +
+                    (dark ? 'midnight' : 'Base') + '/{z}/{y}/{x}.png';
+                if (!tileAttr) tileAttr = '© VWorld';
+            }
+            if (!tileAttr) tileAttr = '© OpenStreetMap';
+            L.tileLayer(tileUrl, { maxZoom: 19, attribution: tileAttr }).addTo(map);
+        }
+
+        function roLoadScript(src, cb, err) {
+            var s = document.createElement('script');
+            s.src = src; s.onload = cb; s.onerror = err;
+            document.head.appendChild(s);
+        }
+        function roLoadCss(href) {
+            var l = document.createElement('link');
+            l.rel = 'stylesheet'; l.href = href;
+            document.head.appendChild(l);
+        }
+
+        // Kotlin 에서 호출: 최적화 결과(JSON)를 받아 지도에 그린다.
+        // payload = { engine:"tmap"|"osm", markers:[{lat,lon,label}], path:[[lon,lat],...],
+        //             altPaths:[[[lon,lat],...], ...] }  ← 선택 안 된 대안 경로들(흐리게)
+        window.roShowMap = function (json) {
+            var data;
+            try { data = JSON.parse(json); } catch (e) { return; }
+            var errBox = document.getElementById('ro-map-err');
+            errBox.style.display = 'none';
+            // 보기 모드: 선택 모드 UI/콜백 해제
+            window._roMapOnClose = null;
+            document.getElementById('ro-map-pick').style.display = 'none';
+            document.getElementById('ro-map-hint').style.display = 'none';
+            document.getElementById('ro-map').style.display = 'block';
+            // 지도 여는 동안 Compose 캔버스 숨김 → 전체화면 캔버스 재그리기와의 겹침(닫기버튼 깜빡임) 방지
+            var ct = document.getElementById('compose-target');
+            if (ct) { ct.style.visibility = 'hidden'; }
+            if (data.engine === 'osm') roShowOsm(data, errBox);
+            else roShowTmap(data, errBox);
+        };
+
+        // 지도 선택 모드: 길게 눌러 위치 선택 → 주소 표시 → '경로에 추가'.
+        // resolve 값: JSON {lat,lon,address} | '' (취소/닫기).
+        window.roPickOnMap = function () {
+            return new Promise(function (resolve) {
+                var errBox = document.getElementById('ro-map-err');
+                errBox.style.display = 'none';
+                var pick = document.getElementById('ro-map-pick');
+                var pickAddr = document.getElementById('ro-map-pick-addr');
+                var pickAdd = document.getElementById('ro-map-pick-add');
+                var pickCancel = document.getElementById('ro-map-pick-cancel');
+                var hint = document.getElementById('ro-map-hint');
+                document.getElementById('ro-map').style.display = 'block';
+                var ct = document.getElementById('compose-target');
+                if (ct) { ct.style.visibility = 'hidden'; }
+
+                var picked = null, marker = null, settled = false, lpTimer = null, lpStart = null;
+
+                function finish(val) {
+                    if (settled) return; settled = true;
+                    window._roMapOnClose = null;
+                    pick.style.display = 'none';
+                    hint.style.display = 'none';
+                    pickAdd.disabled = true;
+                    roHideMap();
+                    resolve(val);
+                }
+                window._roMapOnClose = function () { finish(''); };
+                pickCancel.onclick = function () { finish(''); };
+                pickAdd.onclick = function () { if (picked) finish(JSON.stringify(picked)); };
+
+                function onPick(lat, lon) {
+                    if (marker) _leaflet.removeLayer(marker);
+                    marker = L.marker([lat, lon]).addTo(_leaflet);
+                    picked = null;
+                    pickAdd.disabled = true;
+                    pickAddr.textContent = '주소 확인 중…';
+                    var rg = window.roReverseGeocode ? window.roReverseGeocode(lat, lon) : Promise.resolve('');
+                    rg.then(function (addr) {
+                        var a = addr || ('좌표 ' + lat.toFixed(5) + ', ' + lon.toFixed(5));
+                        picked = { lat: lat, lon: lon, address: a };
+                        pickAddr.textContent = a;
+                        pickAdd.disabled = false;
+                    });
+                }
+
+                function draw() {
+                    var canvas = document.getElementById('ro-map-canvas');
+                    canvas.innerHTML = '';
+                    if (_leaflet) { _leaflet.remove(); _leaflet = null; }
+                    _leaflet = L.map('ro-map-canvas').setView([36.5, 127.8], 7);
+                    roAddTiles(_leaflet);
+                    pick.style.display = 'block';
+                    hint.style.display = 'block';
+                    pickAddr.textContent = '지도를 길게 누르면 해당 위치의 주소가 표시됩니다.';
+                    pickAdd.disabled = true;
+
+                    // 데스크톱 우클릭 + 모바일 long-press
+                    _leaflet.on('contextmenu', function (e) { onPick(e.latlng.lat, e.latlng.lng); });
+
+                    // 터치 long-press 직접 감지 (모바일 contextmenu 미발생 대비)
+                    var cv = _leaflet.getContainer();
+                    function clearLp() { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }
+                    cv.addEventListener('touchstart', function (ev) {
+                        if (ev.touches.length !== 1) { clearLp(); return; }
+                        var t = ev.touches[0];
+                        lpStart = { x: t.clientX, y: t.clientY };
+                        clearLp();
+                        lpTimer = setTimeout(function () {
+                            var rect = cv.getBoundingClientRect();
+                            var pt = L.point(lpStart.x - rect.left, lpStart.y - rect.top);
+                            var ll = _leaflet.containerPointToLatLng(pt);
+                            onPick(ll.lat, ll.lng);
+                        }, 550);
+                    }, { passive: true });
+                    cv.addEventListener('touchmove', function (ev) {
+                        if (!lpStart) return;
+                        var t = ev.touches[0];
+                        if (t && (Math.abs(t.clientX - lpStart.x) > 10 || Math.abs(t.clientY - lpStart.y) > 10)) clearLp();
+                    }, { passive: true });
+                    cv.addEventListener('touchend', clearLp, { passive: true });
+
+                    setTimeout(function () { try { _leaflet.invalidateSize(); } catch (e) {} }, 120);
+                }
+
+                if (typeof L !== 'undefined' && L.map) { draw(); }
+                else {
+                    roLoadCss('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css');
+                    roLoadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js', draw, function () {
+                        errBox.textContent = '지도 라이브러리(Leaflet) 로드 실패.';
+                        errBox.style.display = 'block';
+                        pick.style.display = 'none';
+                    });
+                }
+            });
+        };
+
+        // Kotlin 에서 호출: 공유 링크 전달.
+        // 모바일 등 지원 환경은 OS 공유시트(Web Share API), 그 외는 클립보드 복사.
+        // resolve 값: 'shared' | 'copied' | 'cancelled' | 'failed'
+        window.roShareUrl = function (url) {
+            function fallbackPrompt() {
+                try { window.prompt('아래 링크를 복사하세요 (Ctrl+C)', url); return 'copied'; }
+                catch (e) { return 'failed'; }
+            }
+            function copy() {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    return navigator.clipboard.writeText(url).then(
+                        function () { return 'copied'; },
+                        function () { return fallbackPrompt(); });
+                }
+                return Promise.resolve(fallbackPrompt());
+            }
+            if (navigator.share) {
+                return navigator.share({ title: '최단 경로 공유', url: url }).then(
+                    function () { return 'shared'; },
+                    function (e) { return (e && e.name === 'AbortError') ? 'cancelled' : copy(); });
+            }
+            return copy();
+        };
+
+        // OSM/OSRM 결과 → Leaflet + OSM 타일 (키 불필요)
+        function roShowOsm(data, errBox) {
+            function draw() {
+                var canvas = document.getElementById('ro-map-canvas');
+                canvas.innerHTML = '';
+                if (_leaflet) { _leaflet.remove(); _leaflet = null; }
+                var markers = data.markers || [];
+                var center = markers.length > 0 ? [markers[0].lat, markers[0].lon] : [37.5665, 126.9780];
+                // 단일 지점(후보 미리보기)이면 더 확대
+                var initZoom = markers.length === 1 ? 16 : 12;
+                _leaflet = L.map('ro-map-canvas').setView(center, initZoom);
+                roAddTiles(_leaflet);
+                var pts = [];
+                markers.forEach(function (m, i) {
+                    L.marker([m.lat, m.lon]).addTo(_leaflet).bindPopup((i + 1) + '. ' + m.label);
+                    pts.push([m.lat, m.lon]);
+                });
+                // 대안 경로(회색 점선) 먼저 → 선택 경로(파랑)를 위에 겹쳐 강조
+                var altPaths = (data.altPaths || []).map(function (p) {
+                    return p.map(function (c) { return [c[1], c[0]]; });
+                });
+                altPaths.forEach(function (ap) {
+                    if (ap.length > 1) L.polyline(ap, { color: '#94A3B8', weight: 4, opacity: 0.65, dashArray: '6 8' }).addTo(_leaflet);
+                });
+                var path = (data.path || []).map(function (c) { return [c[1], c[0]]; });
+                if (path.length > 1) L.polyline(path, { color: '#3B82F6', weight: 5 }).addTo(_leaflet);
+                // 경계: 선택 경로 + 대안 경로 + 마커 모두 포함
+                var bnds = [];
+                if (path.length > 1) bnds = bnds.concat(path);
+                altPaths.forEach(function (ap) { bnds = bnds.concat(ap); });
+                if (bnds.length === 0) bnds = pts;
+                if (bnds.length > 1) { try { _leaflet.fitBounds(bnds); } catch (e) {} }
+                setTimeout(function () { try { _leaflet.invalidateSize(); } catch (e) {} }, 120);
+            }
+            if (typeof L !== 'undefined' && L.map) { draw(); }
+            else {
+                roLoadCss('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css');
+                roLoadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js', draw, function () {
+                    errBox.textContent = '지도 라이브러리(Leaflet) 로드 실패.';
+                    errBox.style.display = 'block';
+                });
+            }
+        }
+
+        // 티맵 결과 → 티맵 JS SDK (앱키 필요)
+        function roShowTmap(data, errBox) {
+            var key = (localStorage.getItem('tmap_appkey') || '').trim();
+            function draw() {
+                var canvas = document.getElementById('ro-map-canvas');
+                canvas.innerHTML = '';
+                var markers = data.markers || [];
+                var center = markers.length > 0
+                    ? new Tmapv2.LatLng(markers[0].lat, markers[0].lon)
+                    : new Tmapv2.LatLng(37.5665, 126.9780);
+                _roMap = new Tmapv2.Map('ro-map-canvas', { center: center, zoom: 12, width: '100%', height: '100%' });
+                var bounds = new Tmapv2.LatLngBounds();
+                markers.forEach(function (m, i) {
+                    var pos = new Tmapv2.LatLng(m.lat, m.lon);
+                    new Tmapv2.Marker({ position: pos, map: _roMap, label: String(i + 1), title: m.label });
+                    bounds.extend(pos);
+                });
+                // 대안 경로(회색 점선) 먼저 → 선택 경로(파랑)를 위에 겹쳐 강조
+                (data.altPaths || []).forEach(function (p) {
+                    var ap = p.map(function (c) { return new Tmapv2.LatLng(c[1], c[0]); });
+                    if (ap.length > 1) new Tmapv2.Polyline({ path: ap, strokeColor: '#94A3B8', strokeWeight: 4, strokeStyle: 'dash', map: _roMap });
+                });
+                var path = (data.path || []).map(function (c) { return new Tmapv2.LatLng(c[1], c[0]); });
+                if (path.length > 1) new Tmapv2.Polyline({ path: path, strokeColor: '#3B82F6', strokeWeight: 6, map: _roMap });
+                if (markers.length > 1) { try { _roMap.fitBounds(bounds); } catch (e) {} }
+            }
+            if (typeof Tmapv2 !== 'undefined' && Tmapv2.Map) { draw(); }
+            else if (key) {
+                roLoadScript('https://apis.openapi.sk.com/tmap/jsv2?version=1&appKey=' + encodeURIComponent(key),
+                    draw, function () {
+                        errBox.textContent = '티맵 지도 SDK 로드 실패 — 앱키/도메인 등록을 확인하세요.';
+                        errBox.style.display = 'block';
+                    });
+            } else {
+                errBox.textContent = '티맵 앱키가 없어 지도를 표시할 수 없습니다.';
+                errBox.style.display = 'block';
+            }
+        }
+    </script>
+    <!-- VWorld(국토부) 주소 검색 브리지 — 농작이와 동일 방식. 도로명(ROAD)+지번(PARCEL) 병합.
+         Kotlin 이 roSearchAddress(q) 로 호출 → JSON 배열 문자열 반환. -->
+    <script>
+        (function () {
+            var VWORLD_KEY = "3EBC07F7-1D05-3457-92DF-A4A9AE7DB876";
+            var _vwSeq = 0;
+            // VWorld 는 브라우저 fetch 가 CORS 에 막히므로 JSONP(script 태그)로 호출한다.
+            // typ: 'place'(장소·상호) | 'address'(주소). cat: address 는 ROAD/PARCEL, place 는 '' (전체).
+            function req(q, typ, cat) {
+                return new Promise(function (resolve) {
+                    var cb = '__vw_' + (_vwSeq++) + '_' + Math.floor(performance.now());
+                    var s = document.createElement('script');
+                    var timer = setTimeout(function () { cleanup(); resolve({ items: [], err: 'timeout' }); }, 9000);
+                    function cleanup() {
+                        clearTimeout(timer);
+                        try { delete window[cb]; } catch (e) { window[cb] = undefined; }
+                        if (s.parentNode) s.parentNode.removeChild(s);
+                    }
+                    window[cb] = function (d) {
+                        cleanup();
+                        var st = d && d.response && d.response.status;
+                        if (st !== 'OK') {
+                            var e = d && d.response && d.response.error;
+                            var msg = e ? ((e.text || '') + (e.code ? ' [' + e.code + ']' : '')) : (st || 'ERROR');
+                            resolve({ items: [], err: (msg || 'ERROR') });
+                            return;
+                        }
+                        var items = (d.response.result && d.response.result.items) || [];
+                        var out = items.filter(function (it) { return it.point; }).map(function (it) {
+                            var road = it.address ? it.address.road : '';
+                            var parcel = it.address ? it.address.parcel : '';
+                            var title = it.title || '';
+                            // place: 상호/장소명 = title, 주소를 부제목. address: 도로명/지번이 곧 라벨.
+                            var label = title || road || parcel || '';
+                            var sub = title ? (road || parcel || '') : (road && parcel ? parcel : '');
+                            return {
+                                label: label,
+                                sub: sub,
+                                lat: parseFloat(it.point.y),
+                                lon: parseFloat(it.point.x),
+                            };
+                        }).filter(function (c) { return c.label && !isNaN(c.lat) && !isNaN(c.lon); });
+                        resolve({ items: out, err: null });
+                    };
+                    s.onerror = function () { cleanup(); resolve({ items: [], err: 'network' }); };
+                    s.src = 'https://api.vworld.kr/req/search?service=search&request=search' +
+                        '&version=2.0&size=10&page=1&type=' + typ +
+                        (cat ? '&category=' + cat : '') +
+                        '&format=json&errorformat=json&key=' + VWORLD_KEY +
+                        '&query=' + encodeURIComponent(q) + '&callback=' + cb;
+                    document.head.appendChild(s);
+                });
+            }
+            // 좌표(WGS84) → 주소 문자열 (역지오코딩). 실패 시 빈 문자열.
+            window.roReverseGeocode = function (lat, lon) {
+                return new Promise(function (resolve) {
+                    var cb = '__vwr_' + (_vwSeq++) + '_' + Math.floor(performance.now());
+                    var s = document.createElement('script');
+                    var timer = setTimeout(function () { cleanup(); resolve(''); }, 8000);
+                    function cleanup() {
+                        clearTimeout(timer);
+                        try { delete window[cb]; } catch (e) { window[cb] = undefined; }
+                        if (s.parentNode) s.parentNode.removeChild(s);
+                    }
+                    window[cb] = function (d) {
+                        cleanup();
+                        var st = d && d.response && d.response.status;
+                        if (st !== 'OK') { resolve(''); return; }
+                        var items = d.response.result || [];
+                        var road = '', parcel = '';
+                        items.forEach(function (it) {
+                            if (it.type === 'road') road = it.text; else if (it.type === 'parcel') parcel = it.text;
+                        });
+                        resolve(road || parcel || (items[0] && items[0].text) || '');
+                    };
+                    s.onerror = function () { cleanup(); resolve(''); };
+                    s.src = 'https://api.vworld.kr/req/address?service=address&request=getAddress' +
+                        '&version=2.0&crs=EPSG:4326&type=both&format=json&errorformat=json' +
+                        '&point=' + lon + ',' + lat + '&key=' + VWORLD_KEY + '&callback=' + cb;
+                    document.head.appendChild(s);
+                });
+            };
+
+            // 장소(상호) + 도로명 + 지번 병합, 중복 라벨 제거. { items, error } 반환.
+            window.roSearchAddress = function (query) {
+                var q = (query || '').trim();
+                if (!q) return Promise.resolve(JSON.stringify({ items: [], error: null }));
+                return Promise.all([
+                    req(q, 'place', ''),
+                    req(q, 'address', 'ROAD'),
+                    req(q, 'address', 'PARCEL'),
+                ]).then(function (res) {
+                    // 중복 제거: 도로명/지번/장소 검색이 같은 주소를 서로 다른 좌표
+                    // (도로 기준점·필지 중심·POI 지점)로 반환하므로 좌표를 키에 쓰면 못 걸러낸다.
+                    // → 텍스트(label|sub) 완전일치 + 같은 label 이 ~200m 이내면 같은 곳으로 병합.
+                    var seen = {}, out = [];
+                    function near(a, b) {
+                        return Math.abs(a.lat - b.lat) < 0.002 && Math.abs(a.lon - b.lon) < 0.0025;
+                    }
+                    res.forEach(function (r) {
+                        (r.items || []).forEach(function (c) {
+                            var key = c.label + '|' + (c.sub || '');
+                            if (seen[key]) return;
+                            for (var i = 0; i < out.length; i++) {
+                                if (out[i].label === c.label && near(out[i], c)) {
+                                    // 기존 항목에 부제(주소)가 없으면 채워넣고 버린다
+                                    if (!out[i].sub && c.sub) out[i].sub = c.sub;
+                                    return;
+                                }
+                            }
+                            seen[key] = 1;
+                            out.push(c);
+                        });
+                    });
+                    var err = out.length ? null : (res[0].err || res[1].err || res[2].err || null);
+                    return JSON.stringify({ items: out.slice(0, 10), error: err });
+                }).catch(function (e) {
+                    return JSON.stringify({ items: [], error: String(e) });
+                });
+            };
+        })();
+    </script>
+    <script src="routeopt-web.js?v=69bee30"></script>
+</body>
+</html>
