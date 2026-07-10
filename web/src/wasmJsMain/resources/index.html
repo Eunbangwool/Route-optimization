@@ -202,10 +202,20 @@
                 // 단일 지점(후보 미리보기)이면 더 확대
                 var initZoom = markers.length === 1 ? 16 : 12;
                 _leaflet = L.map('ro-map-canvas').setView(center, initZoom);
-                // 타일: 설정(localStorage tile_url)이 있으면 그것을, 없으면 OSM 공개타일(개발용).
-                var tileUrl = (localStorage.getItem('tile_url') || '').trim()
-                    || 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-                var tileAttr = (localStorage.getItem('tile_attr') || '').trim() || '© OpenStreetMap';
+                // 타일: 설정(localStorage tile_url)이 있으면 그것을 우선.
+                // 없으면 VWorld 국내 지도(WMTS) — 다크모드면 midnight, 아니면 Base.
+                // ⚠️ VWorld WMTS 는 키에 등록된 도메인에서만 로드됨(검색과 동일 키).
+                //    타일 경로 순서는 {z}/{y}/{x} 이며 Leaflet 기본(비 TMS)과 호환된다.
+                var VWORLD_KEY = '3EBC07F7-1D05-3457-92DF-A4A9AE7DB876';
+                var tileUrl = (localStorage.getItem('tile_url') || '').trim();
+                var tileAttr = (localStorage.getItem('tile_attr') || '').trim();
+                if (!tileUrl) {
+                    var dark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                    var layer = dark ? 'midnight' : 'Base';
+                    tileUrl = 'https://api.vworld.kr/req/wmts/1.0.0/' + VWORLD_KEY + '/' + layer + '/{z}/{y}/{x}.png';
+                    if (!tileAttr) tileAttr = '© VWorld';
+                }
+                if (!tileAttr) tileAttr = '© OpenStreetMap';
                 L.tileLayer(tileUrl, { maxZoom: 19, attribution: tileAttr }).addTo(_leaflet);
                 var pts = [];
                 markers.forEach(function (m, i) {
